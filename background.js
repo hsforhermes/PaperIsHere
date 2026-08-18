@@ -1,10 +1,18 @@
 /**
  * PaperIsHere - Background Service Worker
- * Ultimate Bulletproof Edition with Dynamic Download Locations
+ * Bulletproof Naming v2.0.4: Protected Global Memory & Smart Tokenization
  */
 
 let currentTabMetadata = {};
+// GLOBAL MEMORY: Saves the last known valid metadata
+let globalLastKnownMetadata = { doi: null, isbn: null, text: null };
 let activeDownloads = {}; 
+
+const STOP_WORDS = [
+    'the', 'a', 'an', 'and', 'or', 'of', 'in', 'on', 'with', 'by', 'for', 'to', 'at', 
+    'from', 'into', 'during', 'field', 'study', 'review', 'analysis', 'research', 
+    'paper', 'perspective', 'approach', 'towards', 'about', 'some', 'their', 'an'
+];
 
 const fallbackSciHubs = ["https://sci-hub.st", "https://sci-hub.ru", "https://sci-hub.se"];
 const fallbackLibgens = ["https://libgen.li", "https://libgen.vg", "https://libgen.rs"];
@@ -16,15 +24,11 @@ async function checkUrl(url) {
         await fetch(url, { method: 'GET', mode: 'no-cors', signal: controller.signal });
         clearTimeout(timeoutId);
         return true;
-    } catch (error) {
-        return false;
-    }
+    } catch (error) { return false; }
 }
 
 async function findActiveMirror(urls) {
-    for (const url of urls) {
-        if (await checkUrl(url)) return url;
-    }
+    for (const url of urls) { if (await checkUrl(url)) return url; }
     return urls[0];
 }
 
@@ -39,9 +43,7 @@ async function fetchDynamicSciHubs() {
         while ((match = regex.exec(cleanHtml)) !== null) mirrors.push(match[1].toLowerCase());
         const uniqueMirrors = [...new Set(mirrors)];
         return uniqueMirrors.length > 0 ? uniqueMirrors : fallbackSciHubs;
-    } catch (error) {
-        return fallbackSciHubs;
-    }
+    } catch (error) { return fallbackSciHubs; }
 }
 
 async function fetchDynamicLibgens() {
@@ -54,16 +56,8 @@ async function fetchDynamicLibgens() {
         let match;
         while ((match = regex.exec(cleanHtml)) !== null) mirrors.push(match[1].toLowerCase());
         const uniqueMirrors = [...new Set(mirrors)];
-        uniqueMirrors.sort((a, b) => {
-            const format2 = ['.li', '.vg', '.lc'];
-            const aIsFormat2 = format2.some(ext => a.endsWith(ext));
-            const bIsFormat2 = format2.some(ext => b.endsWith(ext));
-            return (bIsFormat2 === aIsFormat2) ? 0 : bIsFormat2 ? 1 : -1;
-        });
         return uniqueMirrors.length > 0 ? uniqueMirrors : fallbackLibgens;
-    } catch (error) {
-        return fallbackLibgens;
-    }
+    } catch (error) { return fallbackLibgens; }
 }
 
 async function updateMirrors() {
@@ -87,6 +81,17 @@ function getInitials(otherNames) {
     return names.map(n => n.charAt(0).toUpperCase()).join('');
 }
 
+function smartTokenizeAndFilter(rawTitle) {
+    if (!rawTitle) return [];
+    let fusedTitle = rawTitle.replace(/[()\[\]{}]/g, ''); 
+    let spacedTitle = fusedTitle.replace(/[^a-zA-Z0-9]/g, ' ');
+    let wordsArray = spacedTitle.split(/\s+/).filter(w => w.length > 0);
+    return wordsArray
+        .filter(w => w.length > 2)
+        .filter(w => !STOP_WORDS.includes(w.toLowerCase()))
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+}
+
 function parseLibgenText(text) {
     if (!text) return null;
     let year = "", author = "", title = "";
@@ -96,9 +101,7 @@ function parseLibgenText(text) {
     const bibYear = text.match(/year\s*=\s*\{(\d{4})\}/i);
     
     if (bibTitle && bibAuthor && bibYear) {
-        title = bibTitle[1];
-        author = bibAuthor[1];
-        year = bibYear[1];
+        title = bibTitle[1]; author = bibAuthor[1]; year = bibYear[1];
     } else {
         const tMatch = text.match(/Title:\s*(.+)/i);
         const aMatch = text.match(/Author\(s\):\s*(.+)/i);
@@ -112,14 +115,8 @@ function parseLibgenText(text) {
         const nameParts = author.split(',')[0].trim().split(' ').filter(Boolean);
         const lastName = nameParts.pop().replace(/[^a-zA-Z]/g, '');
         const initials = nameParts.map(n => n.charAt(0).toUpperCase()).join('');
-        
-        const stopWords = ['the', 'a', 'an', 'and', 'or', 'of', 'in', 'on', 'with', 'by', 'for', 'edition', 'volume', 'global'];
-        const pascalTitle = title.replace(/[^a-zA-Z0-9\s]/g, ' ')
-            .split(/\s+/)
-            .filter(w => w.length > 2 && !stopWords.includes(w.toLowerCase()))
-            .slice(0, 5) 
-            .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-            .join('');
+        const cleanWordsArray = smartTokenizeAndFilter(title);
+        const pascalTitle = cleanWordsArray.slice(0, 6).join('');
 
         return {
             year: year,
@@ -155,9 +152,7 @@ async function getCrossref(doi) {
         if (year && author.family && title) {
             return { year: String(year), last_name: author.family, other_names: author.given || "", title: title };
         }
-    } catch (error) {
-        return null;
-    }
+    } catch (error) { return null; }
     return null;
 }
 
@@ -167,13 +162,15 @@ async function getGemini(text) {
             const apiKey = result.geminiApiKey;
             if (!apiKey) return resolve(null);
 
-            const prompt = `Analyze this text and extract publication metadata.
-Output MUST be a valid JSON object with exactly these keys: "year", "last_name", "other_names", "title".
-- "year": 4-digit publication year.
-- "last_name": Exact surname of FIRST author.
-- "other_names": First name and initials of FIRST author.
-- "title": Convert the title into a PascalCase string of 3 to 6 core keywords. Destroy all adjectives, adverbs, prepositions, stop words, and edition numbers.
-Do not use markdown blocks. Output only the raw JSON.
+            const prompt = `CRITICAL TASK: Analyze the academic text and extract metadata.
+Output MUST be a valid JSON object with exactly these keys: "year", "last_name", "other_names", "keywords".
+RULES FOR "keywords":
+1. Extract exactly 3 to 6 of the MOST IMPORTANT scientific core words from the title.
+2. FUSE words with parentheses FIRST! Example: "(in)visible" MUST become "invisible".
+3. IGNORE AND REMOVE all exact stop words (the, a, in, of, on, at, by, for, with, field, study).
+4. Return a JSON Array of Strings. Each string is ONE single full word.
+Example Title: "Mapping the (in)visible college(s) in the field of entrepreneurship"
+Example Output for "keywords": ["Mapping", "Invisible", "Colleges", "Entrepreneurship"]
 Text: ${text.substring(0, 4000)}`;
 
             try {
@@ -189,11 +186,15 @@ Text: ${text.substring(0, 4000)}`;
                 const data = await apiResponse.json();
                 const aiTextStr = String(data.candidates?.[0]?.content?.parts?.[0]?.text || "").replace(/```json/gi, '').replace(/```/g, '').trim();
                 const parsed = JSON.parse(aiTextStr);
-                if (parsed.year && parsed.last_name && parsed.title) resolve(parsed);
-                else resolve(null);
-            } catch (error) {
-                resolve(null);
-            }
+                
+                if (parsed.year && parsed.last_name && parsed.keywords && Array.isArray(parsed.keywords)) {
+                    parsed.title = smartTokenizeAndFilter(parsed.keywords.join(' ')).slice(0, 6).join('');
+                    if (parsed.title.length > 3) resolve(parsed);
+                    else resolve(null);
+                } else {
+                    resolve(null);
+                }
+            } catch (error) { resolve(null); }
         });
     });
 }
@@ -203,16 +204,13 @@ async function summarizeCrossrefTitle(title) {
         chrome.storage.local.get(['geminiApiKey'], async (result) => {
             const apiKey = result.geminiApiKey;
             if (!apiKey) {
-                const clean = title.replace(/[^a-zA-Z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 3).slice(0, 5).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join('');
-                return resolve(clean);
+                return resolve(smartTokenizeAndFilter(title).slice(0, 6).join(''));
             }
             
-            const prompt = `CRITICAL TASK: Convert the following academic title into a highly condensed PascalCase string of 3 to 6 core keywords.
-RULES:
-1. EXTERMINATE all stop words, prepositions, conjunctions, pronouns, and edition numbers.
-2. Format output as a single unbroken string in PascalCase (no spaces).
-Input Title: "${title}"
-Output:`;
+            const prompt = `CRITICAL TASK: Analyze this academic title.
+Output MUST be a JSON array of 3 to 6 core scientific keywords extracted from the title.
+FUSE words with parentheses first. Example: "(in)visible" -> "invisible".
+Title: "${title}"`;
 
             try {
                 const controller = new AbortController();
@@ -225,22 +223,17 @@ Output:`;
                 });
                 clearTimeout(timeoutId);
                 const data = await apiResponse.json();
-                const shortTitle = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim().replace(/[^a-zA-Z0-9]/g, '') || "";
+                const aiTextStr = String(data.candidates?.[0]?.content?.parts?.[0]?.text || "").replace(/```json/gi, '').replace(/```/g, '').trim();
+                const parsedArray = JSON.parse(aiTextStr);
                 
-                if (shortTitle.length < 5) throw new Error("Title too short");
-                resolve(shortTitle);
+                if (Array.isArray(parsedArray)) {
+                    const cleanTitle = smartTokenizeAndFilter(parsedArray.join(' ')).slice(0, 6).join('');
+                    if(cleanTitle.length > 3) resolve(cleanTitle);
+                    else throw new Error("Too short");
+                } else throw new Error("Not array");
             } catch (error) {
-                const fallback = title.replace(/[^a-zA-Z0-9\s]/g, '').split(/\s+/).slice(0, 5).join('');
-                resolve(fallback);
+                resolve(smartTokenizeAndFilter(title).slice(0, 6).join(''));
             }
-        });
-    });
-}
-
-async function getSaveFolder() {
-    return new Promise((resolve) => {
-        chrome.storage.local.get(['saveFolder'], (res) => {
-            resolve(res.saveFolder || 'Renamed Papers');
         });
     });
 }
@@ -270,24 +263,27 @@ async function generateFinalFilename(doi, isbn, text, originalFilename) {
         if (potentialExt !== "php" && potentialExt !== "html") fileExt = potentialExt;
     }
 
-    const folder = await getSaveFolder();
+    return new Promise((resolve) => {
+        chrome.storage.local.get(['saveFolder'], async (res) => {
+            const folder = res.saveFolder || 'Renamed Papers';
 
-    if (data) {
-        let cleanLastName = data.last_name.replace(/[^a-zA-Z]/g, '');
-        cleanLastName = cleanLastName.charAt(0).toUpperCase() + cleanLastName.slice(1).toLowerCase();
-        const initials = getInitials(data.other_names);
-        
-        let processedTitle = data.title;
-        if (isFromCrossref) processedTitle = await summarizeCrossrefTitle(data.title);
-        else processedTitle = processedTitle.replace(/[^a-zA-Z0-9]/g, '');
-        
-        const finalName = `${data.year}${cleanLastName}${initials}-${processedTitle}`.substring(0, 150);
-        return `${folder}/${finalName}.${fileExt}`;
-    }
-    
-    let fallbackName = safeOriginalName.replace(/[^a-zA-Z0-9.\-]/g, ' ').replace(/\s+/g, ' ').trim();
-    if (!fallbackName.includes('.')) fallbackName += `.${fileExt}`;
-    return `${folder}/${fallbackName}`;
+            if (data) {
+                let cleanLastName = data.last_name.replace(/[^a-zA-Z]/g, '');
+                cleanLastName = cleanLastName.charAt(0).toUpperCase() + cleanLastName.slice(1).toLowerCase();
+                const initials = getInitials(data.other_names);
+                
+                let processedTitle = data.title;
+                if (isFromCrossref) processedTitle = await summarizeCrossrefTitle(data.title);
+                
+                const finalName = `${data.year}${cleanLastName}${initials}-${processedTitle}`.substring(0, 150);
+                resolve(`${folder}/${finalName}.${fileExt}`);
+            } else {
+                let fallbackName = safeOriginalName.replace(/[^a-zA-Z0-9.\-]/g, ' ').replace(/\s+/g, ' ').trim();
+                if (!fallbackName.includes('.')) fallbackName += `.${fileExt}`;
+                resolve(`${folder}/${fallbackName}`);
+            }
+        });
+    });
 }
 
 async function fallbackBlobDownload(url, filename, sendResponse) {
@@ -316,7 +312,14 @@ async function fallbackBlobDownload(url, filename, sendResponse) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === "storeMetadata" && sender.tab) {
+        // Save to current tab
         currentTabMetadata[sender.tab.id] = { doi: message.doi, isbn: message.isbn, text: message.text };
+        
+        // 🛡️ MEMORY SHIELD: Only memorize if we actually found a DOI or ISBN!
+        // This stops Google Scholar or random pages from wiping the precious Springer metadata.
+        if (message.doi || message.isbn) {
+            globalLastKnownMetadata = { doi: message.doi, isbn: message.isbn, text: message.text };
+        }
     }
     
     if (message.action === "checkUnpaywall") {
@@ -364,7 +367,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
     const targetUrl = item.url;
     const finalUrl = item.finalUrl;
-    
     let forcedName = activeDownloads[targetUrl] || (finalUrl && activeDownloads[finalUrl]);
     
     if (forcedName) {
@@ -376,7 +378,6 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
 
     chrome.storage.local.get(['saveFolder'], (folderRes) => {
         const folder = folderRes.saveFolder || 'Renamed Papers';
-        
         if (item.filename.startsWith(`${folder}/`)) {
             suggest({ filename: item.filename, conflictAction: 'uniquify' });
             return;
@@ -384,17 +385,29 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
 
         chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
             const tabId = tabs[0]?.id;
-            const meta = currentTabMetadata[tabId] || Object.values(currentTabMetadata).pop() || {};
             
-            if (meta.doi || meta.isbn || item.url.includes("libgen") || item.url.includes("sci-hub")) {
+            // Fetch tab data
+            let meta = currentTabMetadata[tabId];
+            
+            // 🚀 SMART FALLBACK: If current tab is a native PDF viewer, Scholar, or has NO metadata, USE THE PROTECTED GLOBAL MEMORY!
+            if (!meta || (!meta.doi && !meta.isbn)) {
+                meta = globalLastKnownMetadata;
+            }
+            
+            if (meta.doi || meta.isbn || item.filename.toLowerCase().endsWith('.pdf')) {
                 try {
-                    const filename = await generateFinalFilename(meta.doi, meta.isbn, meta.text, item.filename);
+                    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 4000));
+                    const filename = await Promise.race([
+                        generateFinalFilename(meta.doi, meta.isbn, meta.text, item.filename),
+                        timeoutPromise
+                    ]);
                     suggest({ filename: filename, conflictAction: 'uniquify' });
-                } catch (e) {
-                    suggest({ filename: item.filename });
+                } catch (e) { 
+                    const safeRawName = item.filename.replace(/[^a-zA-Z0-9.\-]/g, '_');
+                    suggest({ filename: `${folder}/${safeRawName}`, conflictAction: 'uniquify' }); 
                 }
-            } else {
-                suggest({ filename: item.filename });
+            } else { 
+                suggest({ filename: item.filename }); 
             }
         });
     });
