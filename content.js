@@ -1,6 +1,6 @@
 /**
  * PaperIsHere - Content Script
- * Scans page for DOI, ISBN, and direct download links (Sci-Hub/Libgen).
+ * Scans page for DOI, ISBN, and direct download links.
  * Injects typography-driven UI buttons and coordinates AI naming.
  */
 
@@ -33,24 +33,38 @@ const pageText = document.body ? document.body.innerText.substring(0, 3000) : ""
 const scholarMeta = document.querySelector('meta[name="citation_pdf_url"]');
 let scholarUrl = scholarMeta ? scholarMeta.content : null;
 
-// Send initial metadata of the CURRENT page
 chrome.runtime.sendMessage({ action: "storeMetadata", doi: doi, isbn: isbn, text: pageText });
 
 const directIcon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>`;
 const sciHubIcon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square"><path d="M12 2v20"></path><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>`;
 const bookIcon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>`;
 
+/**
+ * Smartly detects if the current page is a Sci-Hub proxy/mirror, 
+ * even if the domain name doesn't contain "sci-hub".
+ */
+function checkIsSciHub() {
+    const host = window.location.hostname.toLowerCase();
+    // 1. Check known domains
+    if (host.includes("sci-hub") || host.includes("scihub") || host.includes("sci-net")) return true;
+    
+    // 2. Structural Check: Sci-Hub always has a specific sidebar (<div id="menu">)
+    if (document.getElementById('menu') && document.getElementById('article')) return true;
+    
+    return false;
+}
+
 function extractSciHubPdfUrl() {
     let downloadUrl = window.location.href;
-    const dlBtn = document.querySelector('.download a');
+    const dlBtn = document.querySelector('.download a') || document.querySelector('#menu a[href*=".pdf"]');
     const obj = document.querySelector('object[type="application/pdf"]');
     const iframe = document.querySelector('iframe');
     const embed = document.querySelector('embed');
     
     if (dlBtn && dlBtn.href) downloadUrl = dlBtn.href;
     else if (obj && obj.data) downloadUrl = obj.data;
-    else if (iframe && iframe.src) downloadUrl = iframe.src;
     else if (embed && embed.src) downloadUrl = embed.src;
+    else if (iframe && iframe.src) downloadUrl = iframe.src;
 
     if (downloadUrl.startsWith('//')) downloadUrl = 'https:' + downloadUrl;
     else if (downloadUrl.startsWith('/')) downloadUrl = window.location.origin + downloadUrl;
@@ -78,7 +92,7 @@ function initiateDirectDownload(originalUrl, btnElement) {
     btnElement.style.pointerEvents = "none";
 
     let downloadUrl = originalUrl;
-    if (window.location.hostname.includes("sci-hub")) {
+    if (checkIsSciHub()) {
         downloadUrl = extractSciHubPdfUrl();
     } else if (window.location.hostname.includes("libgen") && (window.location.pathname.includes("ads.php") || window.location.pathname.includes("get.php"))) {
         const libgenDirectUrl = extractLibgenDownloadUrl();
@@ -124,7 +138,6 @@ function createDownloadButton(title, url, iconHtml, actionType) {
         btn.target = "_blank";
         if (title.includes("Libgen")) {
             btn.addEventListener('click', () => {
-                // Only save identifiers to pass to the next tab, not the entire page text!
                 chrome.storage.local.set({ activeLibgenSearchContext: { doi: doi, isbn: isbn } });
             });
         }
@@ -207,8 +220,9 @@ async function injectButtons() {
         const libgenUrl = domains.libgenDomain || "https://libgen.li";
 
         if (doi) {
-            const isOnSciHub = window.location.hostname.includes("sci-hub");
+            const isOnSciHub = checkIsSciHub();
             if (isOnSciHub) {
+                // Now it properly detects sci-net.xyz and turns the button into "SAVE PDF"
                 container.appendChild(createDownloadButton("Save PDF", extractSciHubPdfUrl(), sciHubIcon, "bypass"));
             } else {
                 container.appendChild(createDownloadButton("Get PDF (Sci-Hub)", `${sciHubUrl}/${doi}`, sciHubIcon, "blank"));
@@ -232,7 +246,6 @@ async function injectButtons() {
     document.body.appendChild(container);
 }
 
-// Restore DOI and ISBN from previous search, BUT keep the text of the current page!
 if (window.location.hostname.includes('libgen')) {
     chrome.storage.local.get(['activeLibgenSearchContext'], (res) => {
         if (res.activeLibgenSearchContext) {
