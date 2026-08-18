@@ -1,11 +1,11 @@
 /**
  * PaperIsHere - Content Script
- * Intelligent UI Routing - Real Google Scholar Search
+ * Intelligent UI Routing - Strict Academic Page Detection
  */
 
 let doi = null;
 let isbn = null;
-let articleTitle = document.title;
+let articleTitle = null; // دیگه پیش‌فرض روی اسمِ تبِ سایت‌های عادی نمیذاریم!
 
 const urlMatch = window.location.href.match(/\b(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)\b/i);
 if (urlMatch) doi = urlMatch[1].replace(/[.;,]$/, '');
@@ -29,11 +29,19 @@ if (!isbn) {
 
 if (isbn && isbn.length !== 10 && isbn.length !== 13) isbn = null;
 
-// Extract Title for better Scholar searching
-const metaTitle = document.querySelector('meta[name="citation_title"], meta[property="og:title"]');
-if (metaTitle && metaTitle.content) articleTitle = metaTitle.content;
+// فقط در صورتی تایتل رو بردار که تگ‌های رسمی آکادمیک توی سایت باشه
+const metaTitle = document.querySelector('meta[name="citation_title"], meta[name="DC.Title"], meta[name="prism.title"]');
+if (metaTitle && metaTitle.content) {
+    articleTitle = metaTitle.content;
+}
 
 const pageText = document.body ? document.body.innerText.substring(0, 3000) : "";
+const scholarMeta = document.querySelector('meta[name="citation_pdf_url"]');
+let scholarUrl = scholarMeta ? scholarMeta.content : null;
+
+if (scholarUrl && !scholarUrl.startsWith('http')) {
+    scholarUrl = new URL(scholarUrl, window.location.origin).href;
+}
 
 chrome.runtime.sendMessage({ action: "storeMetadata", doi: doi, isbn: isbn, text: pageText });
 
@@ -190,13 +198,14 @@ async function injectButtons() {
     const isLibgenDownloadPage = window.location.hostname.includes("libgen") && 
                                 (window.location.pathname.includes("ads.php") || window.location.pathname.includes("get.php"));
 
-    if (!doi && !isbn && !articleTitle && !isLibgenDownloadPage) return;
+    // 🛡️ مهمترین بخش: اگر مقاله معتبر نیست، دکمه نساز!
+    if (!doi && !isbn && !scholarUrl && !articleTitle && !isLibgenDownloadPage) return;
 
     const container = document.createElement("div");
     container.style.cssText = "position:fixed; bottom:30px; left:30px; z-index:9999999; display:flex; flex-direction:column; pointer-events:none;";
 
-    // REAL GOOGLE SCHOLAR SEARCH
-    const scholarQuery = doi || articleTitle;
+    // حالا اگه DOI نبود، از تایتل معتبر (و در صورت نبودن جفتش از تایتل تب) برای اسکولار استفاده میکنیم
+    const scholarQuery = doi || articleTitle || (doi ? document.title : null);
     if (scholarQuery) {
         const realScholarUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(scholarQuery)}`;
         container.appendChild(createDownloadButton("Search in Scholar", realScholarUrl, directIcon, "blank"));
