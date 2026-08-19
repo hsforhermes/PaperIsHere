@@ -1,10 +1,9 @@
 /**
  * PaperIsHere - Background Service Worker
- * Bulletproof Naming v2.0.4: Protected Global Memory & Smart Tokenization
+ * Bulletproof Naming v2.0.5: Protected Global Memory & Safe Blob Download
  */
 
 let currentTabMetadata = {};
-// GLOBAL MEMORY: Saves the last known valid metadata
 let globalLastKnownMetadata = { doi: null, isbn: null, text: null };
 let activeDownloads = {}; 
 
@@ -290,10 +289,12 @@ async function fallbackBlobDownload(url, filename, sendResponse) {
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 20000);
+        
         const response = await fetch(url, { signal: controller.signal });
         clearTimeout(timeoutId);
         
         if (!response.ok) throw new Error(`HTTP_${response.status}`);
+        
         const blob = await response.blob();
         if (blob.size < 5000) throw new Error("FILE_TOO_SMALL");
         
@@ -312,13 +313,19 @@ async function fallbackBlobDownload(url, filename, sendResponse) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === "storeMetadata" && sender.tab) {
-        // Save to current tab
         currentTabMetadata[sender.tab.id] = { doi: message.doi, isbn: message.isbn, text: message.text };
         
-        // 🛡️ MEMORY SHIELD: Only memorize if we actually found a DOI or ISBN!
-        // This stops Google Scholar or random pages from wiping the precious Springer metadata.
+        // MEMORY SHIELD V2: Prevent empty viewer pages from overwriting rich abstract text 
         if (message.doi || message.isbn) {
-            globalLastKnownMetadata = { doi: message.doi, isbn: message.isbn, text: message.text };
+            const isSamePaper = (message.doi === globalLastKnownMetadata.doi) || (message.isbn === globalLastKnownMetadata.isbn);
+            const isPoorText = (!message.text || message.text.length < 300);
+            const hasRichGlobal = (globalLastKnownMetadata.text && globalLastKnownMetadata.text.length >= 300);
+            
+            if (isSamePaper && isPoorText && hasRichGlobal) {
+                // Do not overwrite rich text with viewer garbage. Keep global memory intact.
+            } else {
+                globalLastKnownMetadata = { doi: message.doi, isbn: message.isbn, text: message.text };
+            }
         }
     }
     
@@ -385,12 +392,11 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
 
         chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
             const tabId = tabs[0]?.id;
-            
-            // Fetch tab data
             let meta = currentTabMetadata[tabId];
             
-            // 🚀 SMART FALLBACK: If current tab is a native PDF viewer, Scholar, or has NO metadata, USE THE PROTECTED GLOBAL MEMORY!
-            if (!meta || (!meta.doi && !meta.isbn)) {
+            // Apply Memory Shield V2 fallback logic
+            if (!meta || (!meta.doi && !meta.isbn) || 
+               (meta.doi === globalLastKnownMetadata.doi && meta.text && meta.text.length < 300)) {
                 meta = globalLastKnownMetadata;
             }
             

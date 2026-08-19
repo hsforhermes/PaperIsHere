@@ -1,12 +1,18 @@
 /**
  * PaperIsHere - Content Script
- * Intelligent UI Routing - Strict Academic Page Detection
+ * Strict Link Correction (epub -> epdf) & State-Aware Informational UI
  */
+
+// Auto-redirect epub to epdf immediately to prevent the viewer trap
+if (window.location.href.includes('/doi/epub/')) {
+    window.location.replace(window.location.href.replace('/doi/epub/', '/doi/epdf/'));
+}
 
 let doi = null;
 let isbn = null;
-let articleTitle = null; // دیگه پیش‌فرض روی اسمِ تبِ سایت‌های عادی نمیذاریم!
+let articleTitle = null; 
 
+// Extract DOI
 const urlMatch = window.location.href.match(/\b(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)\b/i);
 if (urlMatch) doi = urlMatch[1].replace(/[.;,]$/, '');
 if (!doi) {
@@ -14,39 +20,82 @@ if (!doi) {
     if (textMatch) doi = textMatch[1].replace(/[.;,]$/, '');
 }
 
+// Extract ISBN
 const metaIsbn = document.querySelector('meta[name="citation_isbn"], meta[property="isbn"], meta[name="prism.isbn"]');
 if (metaIsbn && metaIsbn.content) isbn = metaIsbn.content.replace(/[^0-9X]/gi, '');
-
 if (!isbn) {
     const isbn13Match = document.body.innerText.match(/\b(97[89][- \u2013]?\d{1,5}[- \u2013]?\d{1,7}[- \u2013]?\d{1,6}[- \u2013]?\d)\b/);
     if (isbn13Match) isbn = isbn13Match[1].replace(/[^0-9]/g, '');
 }
-
 if (!isbn) {
     const isbn10Match = document.body.innerText.match(/ISBN(?:-10)?\s*[:\u200B]?\s*([\d]{1,5}[- \u2013]?[\d]{1,7}[- \u2013]?[\d]{1,6}[- \u2013]?[\dX])/i);
     if (isbn10Match) isbn = isbn10Match[1].replace(/[^0-9X]/gi, '');
 }
-
 if (isbn && isbn.length !== 10 && isbn.length !== 13) isbn = null;
 
-// فقط در صورتی تایتل رو بردار که تگ‌های رسمی آکادمیک توی سایت باشه
+// Extract Title
 const metaTitle = document.querySelector('meta[name="citation_title"], meta[name="DC.Title"], meta[name="prism.title"]');
 if (metaTitle && metaTitle.content) {
     articleTitle = metaTitle.content;
 }
 
 const pageText = document.body ? document.body.innerText.substring(0, 3000) : "";
-const scholarMeta = document.querySelector('meta[name="citation_pdf_url"]');
-let scholarUrl = scholarMeta ? scholarMeta.content : null;
 
-if (scholarUrl && !scholarUrl.startsWith('http')) {
-    scholarUrl = new URL(scholarUrl, window.location.origin).href;
+function sanitizePublisherUrl(rawUrl) {
+    if (!rawUrl) return null;
+    let safeUrl = rawUrl;
+    
+    if (!safeUrl.startsWith('http')) {
+        safeUrl = new URL(safeUrl, window.location.origin).href;
+    }
+    
+    safeUrl = safeUrl.split('?')[0]; 
+    
+    if (safeUrl.includes('/doi/epub/')) {
+        safeUrl = safeUrl.replace('/doi/epub/', '/doi/epdf/');
+    }
+
+    return safeUrl;
 }
+
+const isPublisherViewerPage = window.location.pathname.includes('/doi/epdf/') || window.location.pathname.includes('/doi/epub/');
+
+function extractNativePdfUrl() {
+    const meta = document.querySelector('meta[name="citation_pdf_url"]');
+    if (meta && meta.content) return sanitizePublisherUrl(meta.content);
+
+    const links = Array.from(document.querySelectorAll('a'));
+    for (const a of links) {
+        const href = (a.href || "").toLowerCase();
+        const text = (a.innerText || a.textContent || "").toLowerCase().trim();
+        const title = (a.title || "").toLowerCase();
+        const className = (a.className || "").toString().toLowerCase();
+
+        if (!href || href === window.location.href.toLowerCase() || href.startsWith('javascript:') || href.includes("sci-hub") || href.includes("libgen") || href.includes("t.me") || href.includes("mailto:")) continue;
+
+        if (href.includes('/doi/pdf/') || href.includes('/doi/epdf/') || href.includes('/doi/epub/')) return sanitizePublisherUrl(a.href);
+        if (href.endsWith('.pdf') || href.includes('.pdf?')) return sanitizePublisherUrl(a.href);
+        
+        if (text === 'pdf' || text === 'download pdf' || text.includes('pdf/epub') || text === 'article pdf') return sanitizePublisherUrl(a.href);
+        if (title === 'pdf' || title.includes('download pdf')) return sanitizePublisherUrl(a.href);
+        if (className.includes('pdf-link') || className.includes('download-pdf') || className === 'pdf' || className.includes('pdf-button')) return sanitizePublisherUrl(a.href);
+    }
+    
+    if (isPublisherViewerPage && doi) {
+        return sanitizePublisherUrl(`https://journals.sagepub.com/doi/epdf/${doi}`);
+    }
+    
+    return null;
+}
+
+let publisherPdfUrl = extractNativePdfUrl();
 
 chrome.runtime.sendMessage({ action: "storeMetadata", doi: doi, isbn: isbn, text: pageText });
 
+// UI ICONS
 const directIcon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>`;
 const sciHubIcon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square"><path d="M12 2v20"></path><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>`;
+const nexusIcon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>`;
 const bookIcon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>`;
 
 function checkIsSciHub() {
@@ -125,7 +174,7 @@ function initiateDirectDownload(originalUrl, btnElement) {
     });
 }
 
-function createDownloadButton(title, url, iconHtml, actionType) {
+function createDownloadButton(title, url, iconHtml, actionType, buttonColor = "#000000", hoverColor = "#7851A9") {
     const btn = document.createElement("a");
 
     if (actionType === "bypass") {
@@ -154,29 +203,29 @@ function createDownloadButton(title, url, iconHtml, actionType) {
         border: 2px solid #000000;
         border-radius: 0px;
         text-decoration: none;
-        font-family: 'Helvetica Neue', Helvetica, sans-serif;
+        font-family: 'Helvetica Neue', Arial, sans-serif;
         font-weight: 800;
         font-size: 14px;
         text-transform: uppercase;
         letter-spacing: 0.5px;
-        box-shadow: 4px 4px 0px #000000;
+        box-shadow: 4px 4px 0px ${buttonColor};
         transition: all 0.2s ease;
         margin-bottom: 12px;
         pointer-events: auto;
         cursor: pointer;
     `;
 
-    btn.innerHTML = `<span style="color:#7851A9; display:flex; align-items:center;">${iconHtml}</span> ${title}`;
+    btn.innerHTML = `<span style="color:${hoverColor}; display:flex; align-items:center;">${iconHtml}</span> ${title}`;
 
     btn.onmouseover = () => {
         btn.style.backgroundColor = "#000000";
         btn.style.color = "#ffffff";
-        btn.style.boxShadow = "4px 4px 0px #7851A9";
+        btn.style.boxShadow = `4px 4px 0px ${hoverColor}`;
     };
     btn.onmouseout = () => {
         btn.style.backgroundColor = "#ffffff";
         btn.style.color = "#000000";
-        btn.style.boxShadow = "4px 4px 0px #000000";
+        btn.style.boxShadow = `4px 4px 0px ${buttonColor}`;
     };
 
     return btn;
@@ -198,50 +247,109 @@ async function injectButtons() {
     const isLibgenDownloadPage = window.location.hostname.includes("libgen") && 
                                 (window.location.pathname.includes("ads.php") || window.location.pathname.includes("get.php"));
 
-    // 🛡️ مهمترین بخش: اگر مقاله معتبر نیست، دکمه نساز!
-    if (!doi && !isbn && !scholarUrl && !articleTitle && !isLibgenDownloadPage) return;
+    if (!doi && !isbn && !publisherPdfUrl && !articleTitle && !isLibgenDownloadPage && !isPublisherViewerPage) return;
 
     const container = document.createElement("div");
     container.style.cssText = "position:fixed; bottom:30px; left:30px; z-index:9999999; display:flex; flex-direction:column; pointer-events:none;";
 
-    // حالا اگه DOI نبود، از تایتل معتبر (و در صورت نبودن جفتش از تایتل تب) برای اسکولار استفاده میکنیم
-    const scholarQuery = doi || articleTitle || (doi ? document.title : null);
-    if (scholarQuery) {
-        const realScholarUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(scholarQuery)}`;
-        container.appendChild(createDownloadButton("Search in Scholar", realScholarUrl, directIcon, "blank"));
+    // PRIORITY 1: PUBLISHER LINK
+    if (publisherPdfUrl) {
+        if (!isPublisherViewerPage) {
+            // Main page: standard button opening epdf in a new tab
+            const btn = createDownloadButton("Open PDF (Direct)", publisherPdfUrl, directIcon, "blank", "#000000", "#10B981");
+            btn.style.order = "1";
+            container.appendChild(btn);
+        } else {
+            // Inside the publisher's viewer: Disabled, greyed-out informative button
+            const infoBtn = document.createElement("div");
+            infoBtn.style.cssText = `
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                background-color: #f9f9f9;
+                color: #888888;
+                padding: 12px 18px;
+                border: 2px dashed #cccccc;
+                border-radius: 0px;
+                font-family: 'Helvetica Neue', Arial, sans-serif;
+                font-weight: 800;
+                font-size: 11px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                margin-bottom: 12px;
+                cursor: not-allowed;
+                order: 1;
+                pointer-events: auto;
+            `;
+            infoBtn.innerHTML = `<span style="color:#888888; display:flex; align-items:center;">${directIcon}</span> USE SITE'S NATIVE PDF BUTTON ↗`;
+            container.appendChild(infoBtn);
+        }
     }
 
-    if (doi) {
+    // PRIORITY 2: UNPAYWALL OPEN ACCESS
+    if (doi && !isPublisherViewerPage) {
         chrome.runtime.sendMessage({ action: "checkUnpaywall", doi: doi }, (response) => {
             if (response && response.url) {
-                container.appendChild(createDownloadButton("Get PDF (Open Access)", response.url, directIcon, "blank"));
+                const btn = createDownloadButton("Open PDF (Unpaywall)", response.url, directIcon, "blank", "#000000", "#10B981");
+                btn.style.order = "2";
+                container.appendChild(btn);
             }
         });
     }
 
-    chrome.storage.local.get(['sciHubDomain', 'libgenDomain'], (domains) => {
+    // PRIORITY 3: GOOGLE SCHOLAR
+    const scholarQuery = doi || articleTitle || (doi ? document.title : null);
+    if (scholarQuery) {
+        const realScholarUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(scholarQuery)}`;
+        const btn = createDownloadButton("Search in Scholar", realScholarUrl, directIcon, "blank");
+        btn.style.order = "3";
+        container.appendChild(btn);
+    }
+
+    // Load Settings
+    chrome.storage.local.get(['sciHubDomain', 'libgenDomain', 'nexusBotUsername'], (domains) => {
         const sciHubUrl = domains.sciHubDomain || "https://sci-hub.st";
         const libgenUrl = domains.libgenDomain || "https://libgen.li";
+        const nexusBotUsername = domains.nexusBotUsername || "sks7777777nexusbot";
 
+        // PRIORITY 4: SCI-HUB
         if (doi) {
             const isOnSciHub = checkIsSciHub();
+            let btn;
             if (isOnSciHub) {
-                container.appendChild(createDownloadButton("Save PDF", extractSciHubPdfUrl(), sciHubIcon, "bypass"));
+                btn = createDownloadButton("Save PDF", extractSciHubPdfUrl(), sciHubIcon, "bypass");
             } else {
-                container.appendChild(createDownloadButton("Get PDF (Sci-Hub)", `${sciHubUrl}/${doi}`, sciHubIcon, "blank"));
+                btn = createDownloadButton("Get PDF (Sci-Hub)", `${sciHubUrl}/${doi}`, sciHubIcon, "blank");
             }
+            btn.style.order = "4";
+            container.appendChild(btn);
         }
 
+        // PRIORITY 5: NEXUS (TELEGRAM)
+        const nexusQuery = doi || isbn;
+        if (nexusQuery) {
+            const telegramUrl = `https://t.me/${nexusBotUsername}?text=${encodeURIComponent(nexusQuery)}`;
+            const btn = createDownloadButton("Search in Nexus (Telegram)", telegramUrl, nexusIcon, "blank", "#000000", "#24A1DE");
+            btn.style.order = "5";
+            container.appendChild(btn);
+        }
+
+        // PRIORITY 6: LIBGEN
         const libgenQuery = isbn || doi;
         if (libgenQuery && !isLibgenDownloadPage) {
             const dynamicSearchUrl = buildLibgenSearchUrl(libgenUrl, libgenQuery);
-            container.appendChild(createDownloadButton("Search Libgen (Books)", dynamicSearchUrl, bookIcon, "blank"));
+            const btn = createDownloadButton("Search Libgen (Books)", dynamicSearchUrl, bookIcon, "blank");
+            btn.style.order = "6";
+            container.appendChild(btn);
         }
 
+        // PRIORITY 7: LIBGEN DOWNLOAD PAGE
         if (isLibgenDownloadPage) {
             const downloadUrl = extractLibgenDownloadUrl();
             if (downloadUrl) {
-                container.appendChild(createDownloadButton("Save PDF (Libgen)", downloadUrl, bookIcon, "bypass"));
+                const btn = createDownloadButton("Save PDF (Libgen)", downloadUrl, bookIcon, "bypass");
+                btn.style.order = "7";
+                container.appendChild(btn);
             }
         }
     });

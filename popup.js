@@ -1,77 +1,58 @@
-/**
- * PaperIsHere - Popup Script
- * Handles UI interactions, folder selection, and data persistence.
- */
-
 document.addEventListener('DOMContentLoaded', () => {
     const saveLocationInput = document.getElementById('saveLocation');
+    const nexusBotInput = document.getElementById('nexusBot');
     const apiKeyInput = document.getElementById('apiKey');
-    const sciHubInput = document.getElementById('sciHub');
-    const libgenInput = document.getElementById('libgen');
     
     const saveBtn = document.getElementById('saveBtn');
-    const autoBtn = document.getElementById('autoBtn');
-    const installGuideBtn = document.getElementById('installGuideBtn');
     const statusDiv = document.getElementById('status');
+    const toggleAdvancedBtn = document.getElementById('toggleAdvancedBtn');
+    const toggleText = toggleAdvancedBtn.querySelector('span');
+    const advancedOptionsDiv = document.getElementById('advancedOptions');
     
-    const advToggle = document.getElementById('advToggle');
-    const advContent = document.getElementById('advContent');
-
-    advToggle.addEventListener('click', () => {
-        advContent.classList.toggle('show');
-        advToggle.textContent = advContent.classList.contains('show') 
-            ? '▲ Hide Advanced Settings' 
-            : '▼ Advanced Settings';
-    });
-
     function showStatus(message, color = '#7851A9') {
         statusDiv.style.color = color;
         statusDiv.textContent = message;
-        setTimeout(() => {
-            statusDiv.textContent = '';
-        }, 3500);
+        setTimeout(() => statusDiv.textContent = '', 3000);
     }
 
-    // Restore cached configurations
-    chrome.storage.local.get(['geminiApiKey', 'sciHubDomain', 'libgenDomain', 'saveFolder'], (result) => {
-        saveLocationInput.value = result.saveFolder || 'Renamed Papers';
-        if (result.geminiApiKey) apiKeyInput.value = result.geminiApiKey;
-        sciHubInput.value = result.sciHubDomain || 'https://sci-hub.st';
-        libgenInput.value = result.libgenDomain || 'https://libgen.li';
+    // باز و بسته شدن خشن و مینیمالِ بخش پیشرفته
+    toggleAdvancedBtn.addEventListener('click', () => {
+        if (advancedOptionsDiv.style.display === 'none' || advancedOptionsDiv.style.display === '') {
+            advancedOptionsDiv.style.display = 'block';
+            toggleText.textContent = '- Hide Settings';
+        } else {
+            advancedOptionsDiv.style.display = 'none';
+            toggleText.textContent = '+ Advanced Settings';
+        }
     });
 
-    // Save inputs
+    // Load saved settings
+    chrome.storage.local.get(['saveFolder', 'nexusBotUsername', 'geminiApiKey'], (result) => {
+        saveLocationInput.value = result.saveFolder || 'Renamed Papers';
+        nexusBotInput.value = result.nexusBotUsername || 'sks7777777nexusbot';
+        if (result.geminiApiKey) apiKeyInput.value = result.geminiApiKey;
+    });
+
+    // Save settings
     saveBtn.addEventListener('click', () => {
-        // Sanitize folder name (remove leading/trailing slashes and weird characters)
         let folder = saveLocationInput.value.trim().replace(/^\/|\/$/g, '').replace(/[<>:"|?*]/g, '');
         if (!folder) folder = 'Renamed Papers';
         
-        const apiKey = apiKeyInput.value.trim();
-        const sciHub = sciHubInput.value.trim().replace(/\/$/, "");
-        const libgen = libgenInput.value.trim().replace(/\/$/, "");
-
+        let nexus = nexusBotInput.value.trim().replace('@', '');
+        if (!nexus) nexus = 'sks7777777nexusbot';
+        
         chrome.storage.local.set({ 
             saveFolder: folder,
-            geminiApiKey: apiKey,
-            sciHubDomain: sciHub,
-            libgenDomain: libgen
+            nexusBotUsername: nexus,
+            geminiApiKey: apiKeyInput.value.trim()
         }, () => {
-            showStatus('SUCCESS: CONFIG SAVED');
+            showStatus('SYSTEM UPDATED');
+            
+            // بستن خودکار تنظیمات پس از ذخیره
+            setTimeout(() => {
+                advancedOptionsDiv.style.display = 'none';
+                toggleText.textContent = '+ Advanced Settings';
+            }, 500);
         });
-    });
-
-    autoBtn.addEventListener('click', () => {
-        showStatus('PINGING SERVERS...', '#000000');
-        chrome.runtime.sendMessage({ action: "pingMirrors" }, () => {
-            chrome.storage.local.get(['sciHubDomain', 'libgenDomain'], (res) => {
-                if (res.sciHubDomain) sciHubInput.value = res.sciHubDomain;
-                if (res.libgenDomain) libgenInput.value = res.libgenDomain;
-                showStatus('SUCCESS: MIRRORS UPDATED');
-            });
-        });
-    });
-
-    installGuideBtn.addEventListener('click', () => {
-        chrome.tabs.create({ url: 'chrome://extensions/' });
     });
 });

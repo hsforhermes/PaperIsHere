@@ -2,163 +2,186 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>PaperIsHere Configuration</title>
+  <title>PaperIsHere Settings</title>
   <style>
-    /* Typography-Driven Minimalist Design System */
     :root {
-      --primary-color: #000000;
-      --accent-color: #7851A9;
-      --bg-color: #ffffff;
-      --text-color: #111111;
-      --gray-border: #e0e0e0;
+      --black: #000000;
+      --white: #ffffff;
+      --purple: #7851A9;
+      --gray: #666666;
     }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-      background-color: var(--bg-color);
-      color: var(--text-color);
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      background-color: var(--white);
+      color: var(--black);
       padding: 24px;
       width: 320px;
       margin: 0;
       box-sizing: border-box;
+      /* کادر دور افزونه نازک‌تر شد (از 4 به 2 پیکسل) */
+      border: 2px solid var(--black); 
     }
+
+    .header {
+      text-align: center;
+      margin-bottom: 16px;
+    }
+
     h1 {
-      font-size: 24px;
+      font-size: 28px;
       font-weight: 900;
       letter-spacing: -1px;
-      margin: 0 0 8px 0;
       text-transform: uppercase;
+      margin: 0;
+      color: var(--black);
     }
-    p {
-      font-size: 13px;
-      font-weight: 400;
-      line-height: 1.5;
-      margin-bottom: 20px;
-      color: #555555;
+
+    .subtitle {
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--gray);
+      margin-top: 4px;
+      margin-bottom: 0;
     }
-    .section-label {
+
+    /* خط جداکننده بالا کاملاً نازک و ساده شد */
+    .light-divider {
+      border-top: 2px solid var(--black);
+      height: 0;
+      margin: 0 0 20px 0;
+    }
+
+    label {
+      display: block;
       font-size: 11px;
       font-weight: 800;
       text-transform: uppercase;
       letter-spacing: 0.5px;
-      margin-bottom: 6px;
-      display: block;
-      color: var(--primary-color);
+      margin-bottom: 8px;
+      color: var(--black);
     }
+
     input {
       width: 100%;
       box-sizing: border-box;
-      padding: 12px;
-      font-size: 13px;
-      font-family: monospace;
-      border: 2px solid var(--primary-color);
+      padding: 14px 12px; /* کمی پدینگ بیشتر برای حس راحتی */
+      font-size: 15px; /* فونت درشت‌تر شد */
+      font-weight: 600; /* فونت ضخیم‌تر (Bold) شد */
+      font-family: 'Courier New', Courier, monospace;
+      background-color: var(--white);
+      border: 2px solid var(--black);
       border-radius: 0;
-      margin-bottom: 16px;
+      color: var(--black);
       outline: none;
-      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      transition: all 0.2s ease;
+      margin-bottom: 20px;
     }
+
+    /* رنگ متن پیش‌فرضِ داخل باکس‌ها کمی پررنگ‌تر شد */
+    input::placeholder {
+      color: #888888;
+      font-weight: 500;
+    }
+
     input:focus {
-      border-color: var(--accent-color);
-      box-shadow: 2px 2px 0px var(--accent-color);
+      border-color: var(--purple);
+      box-shadow: 3px 3px 0px var(--purple);
     }
-    button {
-      width: 100%;
-      padding: 14px;
-      font-size: 13px;
-      font-weight: 800;
-      background-color: var(--primary-color);
-      color: #ffffff;
-      border: none;
-      cursor: pointer;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      transition: background 0.2s ease, transform 0.1s ease, box-shadow 0.2s ease;
-      box-shadow: 3px 3px 0px var(--accent-color);
-      margin-bottom: 12px;
-    }
-    button:hover {
-      background-color: var(--accent-color);
-      box-shadow: 3px 3px 0px var(--primary-color);
-    }
-    button:active {
-      transform: scale(0.98);
-    }
-    .secondary-btn {
-      background-color: #ffffff;
-      color: var(--primary-color);
-      border: 2px solid var(--primary-color);
-      box-shadow: 3px 3px 0px var(--primary-color);
-    }
-    .secondary-btn:hover {
-      background-color: var(--primary-color);
-      color: #ffffff;
-      box-shadow: 3px 3px 0px var(--accent-color);
-    }
-    #status {
-      font-size: 11px;
-      font-weight: 700;
-      text-align: center;
-      height: 16px;
-      color: var(--accent-color);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-top: 8px;
-    }
-    .divider {
-      height: 1px;
-      background-color: var(--gray-border);
-      margin: 16px 0;
-    }
-    
+
     .advanced-toggle {
-      cursor: pointer;
-      color: var(--accent-color);
       font-size: 11px;
-      font-weight: 800;
-      margin-bottom: 16px;
+      font-weight: 900;
       text-transform: uppercase;
-      display: inline-block;
-      user-select: none;
+      color: var(--black);
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 8px;
+      border-top: 2px solid var(--black);
+      border-bottom: 2px solid var(--black);
+      transition: background-color 0.2s, color 0.2s;
+      margin-bottom: 16px;
     }
+
     .advanced-toggle:hover {
-      text-decoration: underline;
+      background-color: var(--black);
+      color: var(--white);
     }
-    .advanced-content {
+
+    #advancedOptions {
       display: none;
       padding-top: 8px;
     }
-    .advanced-content.show {
-      display: block;
+
+    button {
+      width: 100%;
+      padding: 14px;
+      font-size: 14px;
+      font-weight: 900;
+      background-color: var(--white);
+      color: var(--black);
+      border: 2px solid var(--black);
+      border-radius: 0;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      box-shadow: 4px 4px 0px var(--black);
+      transition: all 0.1s ease;
+      margin-top: 8px;
+    }
+
+    button:hover {
+      background-color: var(--purple);
+      color: var(--white);
+      border-color: var(--black);
+      box-shadow: 4px 4px 0px var(--black);
+    }
+
+    button:active {
+      transform: translate(2px, 2px);
+      box-shadow: 2px 2px 0px var(--black);
+    }
+
+    #status {
+      font-size: 11px;
+      font-weight: 900;
+      text-align: center;
+      text-transform: uppercase;
+      height: 16px;
+      color: var(--purple);
+      margin-top: 14px;
     }
   </style>
 </head>
 <body>
-  <h1>PaperIsHere</h1>
-  <p>Configure save location and manage mirrors.</p>
   
-  <span class="section-label">Save Folder (Inside Downloads)</span>
-  <input type="text" id="saveLocation" placeholder="Renamed Papers">
-  
-  <div class="advanced-toggle" id="advToggle">▼ Advanced Settings</div>
-  <div class="advanced-content" id="advContent">
-      <span class="section-label">Gemini API Key</span>
-      <input type="password" id="apiKey" placeholder="Paste your API key here...">
-      
-      <span class="section-label">Sci-Hub Mirror</span>
-      <input type="text" id="sciHub" placeholder="https://sci-hub.st">
-      
-      <span class="section-label">Libgen Mirror</span>
-      <input type="text" id="libgen" placeholder="https://libgen.li">
-      
-      <button id="autoBtn" class="secondary-btn" style="margin-bottom: 16px;">Auto-Ping Servers</button>
+  <div class="header">
+    <h1>PaperIsHere</h1>
+    <p class="subtitle">Configuration</p>
   </div>
   
-  <button id="saveBtn">Save Configuration</button>
+  <div class="light-divider"></div>
   
-  <div class="divider"></div>
+  <label>Save Folder (Downloads)</label>
+  <input type="text" id="saveLocation" placeholder="Renamed Papers">
+
+  <div class="advanced-toggle" id="toggleAdvancedBtn">
+    <span>+ Advanced Settings</span>
+  </div>
+
+  <div id="advancedOptions">
+      <label>Nexus Bot (Telegram)</label>
+      <input type="text" id="nexusBot" placeholder="sks7777777nexusbot">
+      
+      <label>Gemini API Key</label>
+      <input type="password" id="apiKey" placeholder="Insert Key...">
+  </div>
   
-  <span class="section-label">Installation & Management</span>
-  <button id="installGuideBtn" class="secondary-btn">Manage Extensions</button>
-  
+  <button id="saveBtn">Save Settings</button>
   <div id="status"></div>
   
   <script src="popup.js"></script>
