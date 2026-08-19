@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PaperIsHere",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "Typography-driven academic tool: Auto-rename PDFs via Crossref/Gemini, and find free PDFs via Unpaywall, Sci-Hub, and Libgen.",
   "permissions": [
     "downloads",
