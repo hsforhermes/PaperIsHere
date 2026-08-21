@@ -1,8 +1,3 @@
-/**
- * PaperIsHere - Background Service Worker
- * Bulletproof Naming v2.0.5: Protected Global Memory & Safe Blob Download
- */
-
 let currentTabMetadata = {};
 let globalLastKnownMetadata = { doi: null, isbn: null, text: null };
 let activeDownloads = {}; 
@@ -10,11 +5,63 @@ let activeDownloads = {};
 const STOP_WORDS = [
     'the', 'a', 'an', 'and', 'or', 'of', 'in', 'on', 'with', 'by', 'for', 'to', 'at', 
     'from', 'into', 'during', 'field', 'study', 'review', 'analysis', 'research', 
-    'paper', 'perspective', 'approach', 'towards', 'about', 'some', 'their', 'an'
+    'paper', 'perspective', 'approach', 'towards', 'about', 'some', 'their', 'still', 'mapping', 'general', 'miscellaneous'
 ];
 
 const fallbackSciHubs = ["https://sci-hub.st", "https://sci-hub.ru", "https://sci-hub.se"];
 const fallbackLibgens = ["https://libgen.li", "https://libgen.vg", "https://libgen.rs"];
+
+function getSystemPrompt(style) {
+    let outputFormat = "";
+    let specificRules = "";
+    let exampleOutput = "";
+
+    const SMART_KEYWORD_RULE = "CRITICAL KEYWORD EXTRACTION ALGORITHM:\nStep 1: Identify the academic field (e.g., Strategic Management, Economics) from the context.\nStep 2: Scan the input for Author-Provided Keywords or classifications (e.g., JEL).\nStep 3: Extract ONLY the core scientific variables, theoretical contexts, and target populations (e.g., 'ownership', 'family-firms', 'social-context').\nStep 4: STRICTLY EXCLUDE metaphorical phrases (e.g., 'married to the firm'), generic study words ('investigation', 'large-scale', 'evidence', 'study', 'analysis', 'effect', 'impact'), and prepositions.";
+
+    if (style === "pascal") {
+        outputFormat = "[YYYY][AuthorLastName][Initials]-[Keyword1Keyword2Keyword3].pdf";
+        specificRules = "2. FORMAT: 4-digit year, author's last name (capitalized), initials. ONE hyphen. Then 3-6 core keywords in PascalCase (fused together without spaces or hyphens).";
+        exampleOutput = "2015BelenzonS-SocialContextOwnershipFamilyFirms.pdf";
+    } else if (style === "date-kebab") {
+        outputFormat = "[YYYYMMDD]-[AuthorLastName][Initials]-[keyword1]-[keyword2]-[keyword3].pdf";
+        specificRules = "2. FORMAT: Exact date YYYYMMDD (default month/day to 01). ONE hyphen. Author's last name (capitalized), initials. ONE hyphen. Then 3-6 core keywords in LOWERCASE separated by hyphens (kebab-case).";
+        exampleOutput = "20150921-BelenzonS-social-context-ownership-family-firms.pdf";
+    } else if (style === "model1") {
+        outputFormat = "[YYYY]_[FamilyNameInitials]_[Extracted-Keywords].pdf";
+        specificRules = "2. DELIMITERS: Use underscores (_) to separate major blocks. Use hyphens (-) to separate keywords. NEVER use spaces.\n3. FORMAT: Year _ Author FamilyName and Initials _ kebab-case keywords.\n4. VERSIONING: ONLY append a version (e.g., _V01, _V10Final) at the end IF explicitly mentioned in the input text.";
+        exampleOutput = "2015_BelenzonS_social-context-ownership-family-firms.pdf";
+    } else if (style === "model2") {
+        outputFormat = "[YYYYMMDD]_[Project-Name]_[Document-Type].pdf";
+        specificRules = "2. DELIMITERS: Use underscores (_) to separate major blocks. Use hyphens (-) to separate keywords. NEVER use spaces.\n3. FORMAT: YYYYMMDD _ kebab-case Project Name/Keywords _ Document-Type (e.g., methodology, design).\n4. VERSIONING: ONLY append a version (e.g., _V01Draft) at the end IF explicitly mentioned in the text.";
+        exampleOutput = "20260821_entrepreneur-resilience_methodology-design.pdf";
+    } else if (style === "model3") {
+        outputFormat = "[YYYYMMDD]_[Event-or-Report-Description].pdf";
+        specificRules = "2. DELIMITERS: Use underscores (_) to separate major blocks. Use hyphens (-) to separate words. NEVER use spaces.\n3. FORMAT: YYYYMMDD _ kebab-case description.\n4. VERSIONING: ONLY append a version at the end IF explicitly mentioned.";
+        exampleOutput = "20260821_development-progress-report.pdf";
+    } else {
+        outputFormat = "[YYYY][AuthorLastName][Initials]-[keyword1]-[keyword2]-[keyword3].pdf";
+        specificRules = "2. FORMAT: 4-digit year, author's last name (capitalized), initials. ONE hyphen. Then 3-6 core keywords in LOWERCASE separated by hyphens (kebab-case).";
+        exampleOutput = "2015BelenzonS-social-context-ownership-family-firms.pdf";
+    }
+
+    return `You are an expert Data Librarian and File Management AI. Your task is to rename document titles into strict, standardized file names based on institutional conventions.
+
+INPUT:
+You will receive metadata containing the title, authors, keywords, publisher data, and publication date.
+
+OUTPUT FORMAT:
+${outputFormat}
+
+STRICT RULES:
+1. ONLY output the final filename string. Do not provide conversational text.
+${specificRules}
+5. STOP WORDS REMOVAL: Aggressively remove all stop words (the, a, in, of, on, miscellaneous).
+6. SANITIZATION: Remove special characters (* $ \ / < > | " ? [ ] ; = +). Replace "&" with "And".
+${SMART_KEYWORD_RULE}
+
+EXAMPLE OUTPUT:
+${exampleOutput}`;
+}
 
 async function checkUrl(url) {
     try {
@@ -40,8 +87,7 @@ async function fetchDynamicSciHubs() {
         let mirrors = [];
         let match;
         while ((match = regex.exec(cleanHtml)) !== null) mirrors.push(match[1].toLowerCase());
-        const uniqueMirrors = [...new Set(mirrors)];
-        return uniqueMirrors.length > 0 ? uniqueMirrors : fallbackSciHubs;
+        return [...new Set(mirrors)].length > 0 ? [...new Set(mirrors)] : fallbackSciHubs;
     } catch (error) { return fallbackSciHubs; }
 }
 
@@ -54,8 +100,7 @@ async function fetchDynamicLibgens() {
         let mirrors = [];
         let match;
         while ((match = regex.exec(cleanHtml)) !== null) mirrors.push(match[1].toLowerCase());
-        const uniqueMirrors = [...new Set(mirrors)];
-        return uniqueMirrors.length > 0 ? uniqueMirrors : fallbackLibgens;
+        return [...new Set(mirrors)].length > 0 ? [...new Set(mirrors)] : fallbackLibgens;
     } catch (error) { return fallbackLibgens; }
 }
 
@@ -87,8 +132,7 @@ function smartTokenizeAndFilter(rawTitle) {
     let wordsArray = spacedTitle.split(/\s+/).filter(w => w.length > 0);
     return wordsArray
         .filter(w => w.length > 2)
-        .filter(w => !STOP_WORDS.includes(w.toLowerCase()))
-        .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+        .filter(w => !STOP_WORDS.includes(w.toLowerCase()));
 }
 
 function parseLibgenText(text) {
@@ -114,14 +158,13 @@ function parseLibgenText(text) {
         const nameParts = author.split(',')[0].trim().split(' ').filter(Boolean);
         const lastName = nameParts.pop().replace(/[^a-zA-Z]/g, '');
         const initials = nameParts.map(n => n.charAt(0).toUpperCase()).join('');
-        const cleanWordsArray = smartTokenizeAndFilter(title);
-        const pascalTitle = cleanWordsArray.slice(0, 6).join('');
 
         return {
             year: year,
+            full_date: `${year}0101`,
             last_name: lastName.charAt(0).toUpperCase() + lastName.slice(1).toLowerCase(),
             other_names: initials,
-            title: pascalTitle
+            title: title
         };
     }
     return null;
@@ -139,38 +182,69 @@ async function getCrossref(doi) {
         const json = await response.json();
         const item = json.message;
         
-        let year = "";
-        if (item['published-print']?.['date-parts']?.[0]?.[0]) year = item['published-print']['date-parts'][0][0];
-        else if (item['published-online']?.['date-parts']?.[0]?.[0]) year = item['published-online']['date-parts'][0][0];
-        else if (item.issued?.['date-parts']?.[0]?.[0]) year = item.issued['date-parts'][0][0];
-        else if (item.created?.['date-parts']?.[0]?.[0]) year = item.created['date-parts'][0][0];
+        let dateParts = item['published-print']?.['date-parts']?.[0] 
+                     || item['published-online']?.['date-parts']?.[0] 
+                     || item.issued?.['date-parts']?.[0] 
+                     || item.created?.['date-parts']?.[0];
+        
+        let year = "", month = "01", day = "01", full_date = "";
+        if (dateParts) {
+            year = String(dateParts[0]);
+            if (dateParts[1]) month = String(dateParts[1]).padStart(2, '0');
+            if (dateParts[2]) day = String(dateParts[2]).padStart(2, '0');
+            full_date = `${year}${month}${day}`;
+        }
         
         const author = item.author?.[0] || {};
         const title = item.title?.[0]?.replace(/<[^>]+>/g, '') || "";
         
         if (year && author.family && title) {
-            return { year: String(year), last_name: author.family, other_names: author.given || "", title: title };
+            return { year: year, full_date: full_date, last_name: author.family, other_names: author.given || "", title: title };
         }
     } catch (error) { return null; }
     return null;
 }
 
-async function getGemini(text) {
+function generateFallbackName(data, style, fileExt) {
+    let cleanLastName = data.last_name.replace(/[^a-zA-Z]/g, '');
+    cleanLastName = cleanLastName.charAt(0).toUpperCase() + cleanLastName.slice(1).toLowerCase();
+    const initials = getInitials(data.other_names);
+    let dateStr = data.year;
+    
+    let cleanWordsArray = smartTokenizeAndFilter(data.title);
+    let keywordsPart = "";
+    
+    if (style === "pascal") {
+        keywordsPart = cleanWordsArray.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).slice(0, 6).join('');
+        return `${dateStr}${cleanLastName}${initials}-${keywordsPart}.${fileExt}`;
+    } else if (style === "date-kebab") {
+        dateStr = data.full_date || `${data.year}0101`; 
+        keywordsPart = cleanWordsArray.map(w => w.toLowerCase()).slice(0, 6).join('-');
+        return `${dateStr}-${cleanLastName}${initials}-${keywordsPart}.${fileExt}`;
+    } else if (style === "model1") {
+        keywordsPart = cleanWordsArray.map(w => w.toLowerCase()).slice(0, 6).join('-');
+        return `${dateStr}_${cleanLastName}${initials}_${keywordsPart}.${fileExt}`;
+    } else if (style === "model2") {
+        dateStr = data.full_date || `${data.year}0101`; 
+        keywordsPart = cleanWordsArray.map(w => w.toLowerCase()).slice(0, 5).join('-');
+        return `${dateStr}_${keywordsPart}_document.${fileExt}`;
+    } else if (style === "model3") {
+        dateStr = data.full_date || `${data.year}0101`; 
+        keywordsPart = cleanWordsArray.map(w => w.toLowerCase()).slice(0, 5).join('-');
+        return `${dateStr}_${keywordsPart}_report.${fileExt}`;
+    } else {
+        keywordsPart = cleanWordsArray.map(w => w.toLowerCase()).slice(0, 6).join('-');
+        return `${dateStr}${cleanLastName}${initials}-${keywordsPart}.${fileExt}`;
+    }
+}
+
+async function callGemini(inputText, style) {
     return new Promise((resolve) => {
         chrome.storage.local.get(['geminiApiKey'], async (result) => {
             const apiKey = result.geminiApiKey;
             if (!apiKey) return resolve(null);
 
-            const prompt = `CRITICAL TASK: Analyze the academic text and extract metadata.
-Output MUST be a valid JSON object with exactly these keys: "year", "last_name", "other_names", "keywords".
-RULES FOR "keywords":
-1. Extract exactly 3 to 6 of the MOST IMPORTANT scientific core words from the title.
-2. FUSE words with parentheses FIRST! Example: "(in)visible" MUST become "invisible".
-3. IGNORE AND REMOVE all exact stop words (the, a, in, of, on, at, by, for, with, field, study).
-4. Return a JSON Array of Strings. Each string is ONE single full word.
-Example Title: "Mapping the (in)visible college(s) in the field of entrepreneurship"
-Example Output for "keywords": ["Mapping", "Invisible", "Colleges", "Entrepreneurship"]
-Text: ${text.substring(0, 4000)}`;
+            const finalPrompt = `${getSystemPrompt(style)}\n\nInput: ${inputText.substring(0, 4000)}`;
 
             try {
                 const controller = new AbortController();
@@ -178,84 +252,25 @@ Text: ${text.substring(0, 4000)}`;
                 const apiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+                    body: JSON.stringify({ contents: [{ parts: [{ text: finalPrompt }] }] }),
                     signal: controller.signal
                 });
                 clearTimeout(timeoutId);
                 const data = await apiResponse.json();
-                const aiTextStr = String(data.candidates?.[0]?.content?.parts?.[0]?.text || "").replace(/```json/gi, '').replace(/```/g, '').trim();
-                const parsed = JSON.parse(aiTextStr);
                 
-                if (parsed.year && parsed.last_name && parsed.keywords && Array.isArray(parsed.keywords)) {
-                    parsed.title = smartTokenizeAndFilter(parsed.keywords.join(' ')).slice(0, 6).join('');
-                    if (parsed.title.length > 3) resolve(parsed);
-                    else resolve(null);
-                } else {
-                    resolve(null);
-                }
+                let aiResult = String(data.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+                aiResult = aiResult.replace(/```/g, '').replace(/json/gi, '').trim();
+                
+                if (aiResult.length > 5) resolve(aiResult);
+                else resolve(null);
             } catch (error) { resolve(null); }
         });
     });
 }
 
-async function summarizeCrossrefTitle(title) {
-    return new Promise((resolve) => {
-        chrome.storage.local.get(['geminiApiKey'], async (result) => {
-            const apiKey = result.geminiApiKey;
-            if (!apiKey) {
-                return resolve(smartTokenizeAndFilter(title).slice(0, 6).join(''));
-            }
-            
-            const prompt = `CRITICAL TASK: Analyze this academic title.
-Output MUST be a JSON array of 3 to 6 core scientific keywords extracted from the title.
-FUSE words with parentheses first. Example: "(in)visible" -> "invisible".
-Title: "${title}"`;
-
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 6000);
-                const apiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-                    signal: controller.signal
-                });
-                clearTimeout(timeoutId);
-                const data = await apiResponse.json();
-                const aiTextStr = String(data.candidates?.[0]?.content?.parts?.[0]?.text || "").replace(/```json/gi, '').replace(/```/g, '').trim();
-                const parsedArray = JSON.parse(aiTextStr);
-                
-                if (Array.isArray(parsedArray)) {
-                    const cleanTitle = smartTokenizeAndFilter(parsedArray.join(' ')).slice(0, 6).join('');
-                    if(cleanTitle.length > 3) resolve(cleanTitle);
-                    else throw new Error("Too short");
-                } else throw new Error("Not array");
-            } catch (error) {
-                resolve(smartTokenizeAndFilter(title).slice(0, 6).join(''));
-            }
-        });
-    });
-}
-
 async function generateFinalFilename(doi, isbn, text, originalFilename) {
-    let data = null;
-    let isFromCrossref = false;
-    
-    if (text && (text.includes('@book') || text.includes('Publisher:'))) {
-        data = parseLibgenText(text);
-    }
-    
-    if (!data && doi) {
-        data = await getCrossref(doi);
-        if (data) isFromCrossref = true;
-    }
-    
-    if (!data && text) {
-        data = await getGemini(text);
-    }
-
-    let safeOriginalName = (originalFilename || "Unknown_File.pdf").split('?')[0]; 
     let fileExt = "pdf";
+    let safeOriginalName = (originalFilename || "Unknown_File.pdf").split('?')[0]; 
     const extMatch = safeOriginalName.match(/\.([a-zA-Z0-9]+)$/);
     if (extMatch) {
         const potentialExt = extMatch[1].toLowerCase();
@@ -263,19 +278,33 @@ async function generateFinalFilename(doi, isbn, text, originalFilename) {
     }
 
     return new Promise((resolve) => {
-        chrome.storage.local.get(['saveFolder'], async (res) => {
+        chrome.storage.local.get(['saveFolder', 'namingStyle'], async (res) => {
             const folder = res.saveFolder || 'Renamed Papers';
+            const style = res.namingStyle || 'kebab';
+            let finalName = null;
+            let crossrefData = null;
 
-            if (data) {
-                let cleanLastName = data.last_name.replace(/[^a-zA-Z]/g, '');
-                cleanLastName = cleanLastName.charAt(0).toUpperCase() + cleanLastName.slice(1).toLowerCase();
-                const initials = getInitials(data.other_names);
-                
-                let processedTitle = data.title;
-                if (isFromCrossref) processedTitle = await summarizeCrossrefTitle(data.title);
-                
-                const finalName = `${data.year}${cleanLastName}${initials}-${processedTitle}`.substring(0, 150);
-                resolve(`${folder}/${finalName}.${fileExt}`);
+            if (text && (text.includes('@book') || text.includes('Publisher:'))) {
+                const data = parseLibgenText(text);
+                if (data) finalName = generateFallbackName(data, style, fileExt);
+            }
+            
+            if (!finalName && doi) {
+                crossrefData = await getCrossref(doi);
+                if (crossrefData) {
+                    const structuredInput = `Title: "${crossrefData.title}"\nAuthor: ${crossrefData.last_name}, ${crossrefData.other_names}\nDate: ${crossrefData.full_date || crossrefData.year}\nContext: ${text.substring(0, 1500)}`;
+                    finalName = await callGemini(structuredInput, style);
+                    if (!finalName) finalName = generateFallbackName(crossrefData, style, fileExt);
+                }
+            }
+
+            if (!finalName && text) {
+                finalName = await callGemini(text, style);
+            }
+
+            if (finalName) {
+                finalName = finalName.replace(/\.pdf$/i, '') + `.${fileExt}`;
+                resolve(`${folder}/${finalName}`);
             } else {
                 let fallbackName = safeOriginalName.replace(/[^a-zA-Z0-9.\-]/g, ' ').replace(/\s+/g, ' ').trim();
                 if (!fallbackName.includes('.')) fallbackName += `.${fileExt}`;
@@ -289,12 +318,10 @@ async function fallbackBlobDownload(url, filename, sendResponse) {
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 20000);
-        
         const response = await fetch(url, { signal: controller.signal });
         clearTimeout(timeoutId);
         
         if (!response.ok) throw new Error(`HTTP_${response.status}`);
-        
         const blob = await response.blob();
         if (blob.size < 5000) throw new Error("FILE_TOO_SMALL");
         
@@ -315,22 +342,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === "storeMetadata" && sender.tab) {
         currentTabMetadata[sender.tab.id] = { doi: message.doi, isbn: message.isbn, text: message.text };
         
-        // MEMORY SHIELD V2: Prevent empty viewer pages from overwriting rich abstract text 
         if (message.doi || message.isbn) {
             const isSamePaper = (message.doi === globalLastKnownMetadata.doi) || (message.isbn === globalLastKnownMetadata.isbn);
             const isPoorText = (!message.text || message.text.length < 300);
             const hasRichGlobal = (globalLastKnownMetadata.text && globalLastKnownMetadata.text.length >= 300);
             
-            if (isSamePaper && isPoorText && hasRichGlobal) {
-                // Do not overwrite rich text with viewer garbage. Keep global memory intact.
-            } else {
+            if (!(isSamePaper && isPoorText && hasRichGlobal)) {
                 globalLastKnownMetadata = { doi: message.doi, isbn: message.isbn, text: message.text };
             }
         }
     }
     
     if (message.action === "checkUnpaywall") {
-        fetch(`https://api.unpaywall.org/v2/${message.doi}?email=researcher@example.com`)
+        fetch(`[https://api.unpaywall.org/v2/$](https://api.unpaywall.org/v2/$){message.doi}?email=researcher@example.com`)
             .then(res => res.json())
             .then(data => sendResponse({ url: data.best_oa_location?.url_for_pdf }))
             .catch(() => sendResponse({ url: null }));
@@ -354,18 +378,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 
                 try {
                     chrome.downloads.download({ url: safeUrl, saveAs: false }, (downloadId) => {
-                        if (chrome.runtime.lastError || !downloadId) {
-                            fallbackBlobDownload(safeUrl, filename, sendResponse);
-                        } else {
-                            sendResponse({ success: true, filename: filename });
-                        }
+                        if (chrome.runtime.lastError || !downloadId) fallbackBlobDownload(safeUrl, filename, sendResponse);
+                        else sendResponse({ success: true, filename: filename });
                     });
-                } catch (syncError) {
-                    fallbackBlobDownload(safeUrl, filename, sendResponse);
-                }
-            } catch (error) {
-                sendResponse({ success: false, error: error.message });
-            }
+                } catch (syncError) { fallbackBlobDownload(safeUrl, filename, sendResponse); }
+            } catch (error) { sendResponse({ success: false, error: error.message }); }
         })();
         return true; 
     }
@@ -394,7 +411,6 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
             const tabId = tabs[0]?.id;
             let meta = currentTabMetadata[tabId];
             
-            // Apply Memory Shield V2 fallback logic
             if (!meta || (!meta.doi && !meta.isbn) || 
                (meta.doi === globalLastKnownMetadata.doi && meta.text && meta.text.length < 300)) {
                 meta = globalLastKnownMetadata;
@@ -412,9 +428,7 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
                     const safeRawName = item.filename.replace(/[^a-zA-Z0-9.\-]/g, '_');
                     suggest({ filename: `${folder}/${safeRawName}`, conflictAction: 'uniquify' }); 
                 }
-            } else { 
-                suggest({ filename: item.filename }); 
-            }
+            } else { suggest({ filename: item.filename }); }
         });
     });
     return true; 

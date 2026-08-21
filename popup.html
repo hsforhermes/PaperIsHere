@@ -4,157 +4,59 @@
   <meta charset="UTF-8">
   <title>PaperIsHere Settings</title>
   <style>
-    :root {
-      --black: #000000;
-      --white: #ffffff;
-      --purple: #7851A9;
-      --gray: #666666;
-    }
-
+    :root { --black: #000000; --white: #ffffff; --purple: #7851A9; --gray: #666666; }
     body {
-      font-family: 'Helvetica Neue', Arial, sans-serif;
-      background-color: var(--white);
-      color: var(--black);
-      padding: 24px;
-      width: 320px;
-      margin: 0;
-      box-sizing: border-box;
-      /* کادر دور افزونه نازک‌تر شد (از 4 به 2 پیکسل) */
+      font-family: 'Helvetica Neue', Arial, sans-serif; background-color: var(--white);
+      color: var(--black); padding: 24px; width: 320px; margin: 0; box-sizing: border-box;
       border: 2px solid var(--black); 
     }
-
-    .header {
-      text-align: center;
-      margin-bottom: 16px;
-    }
-
-    h1 {
-      font-size: 28px;
-      font-weight: 900;
-      letter-spacing: -1px;
-      text-transform: uppercase;
-      margin: 0;
-      color: var(--black);
-    }
-
-    .subtitle {
-      font-size: 10px;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: 2px;
-      color: var(--gray);
-      margin-top: 4px;
-      margin-bottom: 0;
-    }
-
-    /* خط جداکننده بالا کاملاً نازک و ساده شد */
-    .light-divider {
-      border-top: 2px solid var(--black);
-      height: 0;
-      margin: 0 0 20px 0;
-    }
-
-    label {
-      display: block;
-      font-size: 11px;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 8px;
-      color: var(--black);
-    }
-
+    .header { text-align: center; margin-bottom: 16px; }
+    h1 { font-size: 28px; font-weight: 900; letter-spacing: -1px; text-transform: uppercase; margin: 0; color: var(--black); }
+    .subtitle { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 2px; color: var(--gray); margin-top: 4px; margin-bottom: 0; }
+    .light-divider { border-top: 2px solid var(--black); height: 0; margin: 0 0 20px 0; }
+    label { display: block; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; color: var(--black); }
+    
     input {
-      width: 100%;
-      box-sizing: border-box;
-      padding: 14px 12px; /* کمی پدینگ بیشتر برای حس راحتی */
-      font-size: 15px; /* فونت درشت‌تر شد */
-      font-weight: 600; /* فونت ضخیم‌تر (Bold) شد */
-      font-family: 'Courier New', Courier, monospace;
-      background-color: var(--white);
-      border: 2px solid var(--black);
-      border-radius: 0;
-      color: var(--black);
-      outline: none;
-      transition: all 0.2s ease;
-      margin-bottom: 20px;
+      width: 100%; box-sizing: border-box; padding: 14px 12px; font-size: 14px; font-weight: 600;
+      font-family: 'Courier New', Courier, monospace; background-color: var(--white);
+      border: 2px solid var(--black); border-radius: 0; color: var(--black); outline: none;
+      transition: all 0.2s ease; margin-bottom: 20px;
     }
+    input::placeholder { color: #888888; font-weight: 500; }
+    input:focus { border-color: var(--purple); box-shadow: 3px 3px 0px var(--purple); }
+    
+    .custom-select-wrapper { margin-bottom: 20px; display: flex; flex-direction: column; }
+    .custom-select {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 14px 12px; font-size: 13px; font-weight: 600; font-family: 'Courier New', Courier, monospace;
+      background-color: var(--white); border: 2px solid var(--black);
+      cursor: pointer; transition: all 0.2s ease;
+    }
+    .custom-select:hover { border-color: var(--purple); box-shadow: 3px 3px 0px var(--purple); }
+    .custom-select.active { border-color: var(--purple); border-bottom: none; box-shadow: none; }
+    .custom-select-arrow { font-size: 10px; transition: transform 0.2s; }
+    .custom-select.active .custom-select-arrow { transform: rotate(180deg); }
+    
+    .custom-options {
+      background-color: var(--white); border: 2px solid var(--purple); border-top: none;
+      box-shadow: 3px 3px 0px var(--purple); display: none; margin-top: 0;
+    }
+    .custom-options.open { display: block; }
+    .custom-option {
+      padding: 12px; font-size: 12px; font-weight: 600; font-family: 'Courier New', Courier, monospace;
+      border-top: 2px solid var(--black); cursor: pointer; transition: background 0.1s, color 0.1s;
+    }
+    .custom-option:hover { background-color: var(--black); color: var(--white); }
+    .custom-option.selected { background-color: var(--purple); color: var(--white); }
 
-    /* رنگ متن پیش‌فرضِ داخل باکس‌ها کمی پررنگ‌تر شد */
-    input::placeholder {
-      color: #888888;
-      font-weight: 500;
-    }
-
-    input:focus {
-      border-color: var(--purple);
-      box-shadow: 3px 3px 0px var(--purple);
-    }
-
-    .advanced-toggle {
-      font-size: 11px;
-      font-weight: 900;
-      text-transform: uppercase;
-      color: var(--black);
-      cursor: pointer;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 10px 8px;
-      border-top: 2px solid var(--black);
-      border-bottom: 2px solid var(--black);
-      transition: background-color 0.2s, color 0.2s;
-      margin-bottom: 16px;
-    }
-
-    .advanced-toggle:hover {
-      background-color: var(--black);
-      color: var(--white);
-    }
-
-    #advancedOptions {
-      display: none;
-      padding-top: 8px;
-    }
-
-    button {
-      width: 100%;
-      padding: 14px;
-      font-size: 14px;
-      font-weight: 900;
-      background-color: var(--white);
-      color: var(--black);
-      border: 2px solid var(--black);
-      border-radius: 0;
-      cursor: pointer;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      box-shadow: 4px 4px 0px var(--black);
-      transition: all 0.1s ease;
-      margin-top: 8px;
-    }
-
-    button:hover {
-      background-color: var(--purple);
-      color: var(--white);
-      border-color: var(--black);
-      box-shadow: 4px 4px 0px var(--black);
-    }
-
-    button:active {
-      transform: translate(2px, 2px);
-      box-shadow: 2px 2px 0px var(--black);
-    }
-
-    #status {
-      font-size: 11px;
-      font-weight: 900;
-      text-align: center;
-      text-transform: uppercase;
-      height: 16px;
-      color: var(--purple);
-      margin-top: 14px;
-    }
+    .advanced-toggle { font-size: 11px; font-weight: 900; text-transform: uppercase; color: var(--black); cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 10px 8px; border-top: 2px solid var(--black); border-bottom: 2px solid var(--black); transition: background-color 0.2s, color 0.2s; margin-bottom: 16px; }
+    .advanced-toggle:hover { background-color: var(--black); color: var(--white); }
+    #advancedOptions { display: none; padding-top: 8px; }
+    
+    button { width: 100%; padding: 14px; font-size: 14px; font-weight: 900; background-color: var(--white); color: var(--black); border: 2px solid var(--black); border-radius: 0; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; box-shadow: 4px 4px 0px var(--black); transition: all 0.1s ease; margin-top: 8px; }
+    button:hover { background-color: var(--purple); color: var(--white); border-color: var(--black); box-shadow: 4px 4px 0px var(--black); }
+    button:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0px var(--black); }
+    #status { font-size: 11px; font-weight: 900; text-align: center; text-transform: uppercase; height: 16px; color: var(--purple); margin-top: 14px; }
   </style>
 </head>
 <body>
@@ -163,11 +65,27 @@
     <h1>PaperIsHere</h1>
     <p class="subtitle">Configuration</p>
   </div>
-  
   <div class="light-divider"></div>
   
   <label>Save Folder (Downloads)</label>
   <input type="text" id="saveLocation" placeholder="Renamed Papers">
+
+  <label>Naming Format</label>
+  <div class="custom-select-wrapper" id="namingDropdown">
+    <div class="custom-select">
+      <span class="custom-select-trigger">YYYYName-kebab-case</span>
+      <span class="custom-select-arrow">▼</span>
+    </div>
+    <div class="custom-options">
+      <div class="custom-option" data-value="kebab">YYYYName-kebab-case</div>
+      <div class="custom-option" data-value="pascal">YYYYName-PascalCase</div>
+      <div class="custom-option" data-value="date-kebab">YYYYMMDD-Name-kebab</div>
+      <div class="custom-option" data-value="model1">Academic_YYYY_Name_Keyword</div>
+      <div class="custom-option" data-value="model2">Project_YYYYMMDD_Keyword</div>
+      <div class="custom-option" data-value="model3">Report_YYYYMMDD_Keyword</div>
+    </div>
+  </div>
+  <input type="hidden" id="namingStyle" value="kebab">
 
   <div class="advanced-toggle" id="toggleAdvancedBtn">
     <span>+ Advanced Settings</span>
