@@ -19,13 +19,13 @@ function getSystemPrompt(style) {
     const SMART_KEYWORD_RULE = "CRITICAL KEYWORD EXTRACTION ALGORITHM:\nStep 1: Identify the academic field (e.g., Strategic Management, Economics) from the context.\nStep 2: Scan the input for Author-Provided Keywords or classifications (e.g., JEL).\nStep 3: Extract ONLY the core scientific variables, theoretical contexts, and target populations (e.g., 'ownership', 'family-firms', 'social-context').\nStep 4: STRICTLY EXCLUDE metaphorical phrases (e.g., 'married to the firm'), generic study words ('investigation', 'large-scale', 'evidence', 'study', 'analysis', 'effect', 'impact'), and prepositions.";
 
     if (style === "pascal") {
-        outputFormat = "[YYYY][AuthorLastName][Initials]-[Keyword1Keyword2Keyword3].pdf";
-        specificRules = "2. FORMAT: 4-digit year, author's last name (capitalized), initials. ONE hyphen. Then 3-6 core keywords in PascalCase (fused together without spaces or hyphens).";
-        exampleOutput = "2015BelenzonS-SocialContextOwnershipFamilyFirms.pdf";
+        outputFormat = "[YYYY]-[AuthorLastName][Initials]-[Keyword1Keyword2Keyword3].pdf";
+        specificRules = "2. FORMAT: 4-digit year. ONE hyphen. Author's last name (capitalized), initials. ONE hyphen. Then 3-6 core keywords in PascalCase (fused together without spaces or hyphens).";
+        exampleOutput = "2015-BelenzonS-SocialContextOwnershipFamilyFirms.pdf";
     } else if (style === "date-kebab") {
-        outputFormat = "[YYYYMMDD]-[AuthorLastName][Initials]-[keyword1]-[keyword2]-[keyword3].pdf";
-        specificRules = "2. FORMAT: Exact date YYYYMMDD (default month/day to 01). ONE hyphen. Author's last name (capitalized), initials. ONE hyphen. Then 3-6 core keywords in LOWERCASE separated by hyphens (kebab-case).";
-        exampleOutput = "20150921-BelenzonS-social-context-ownership-family-firms.pdf";
+        outputFormat = "[YYYYMMDD]-[AuthorLastName][Initials]-[keyword1]_[keyword2]_[keyword3].pdf";
+        specificRules = "2. FORMAT: Exact date YYYYMMDD (default month/day to 01). ONE hyphen. Author's last name (capitalized), initials. ONE hyphen. Then 3-6 core keywords in LOWERCASE separated by underscores (snake_case).";
+        exampleOutput = "20150921-BelenzonS-social_context_ownership_family_firms.pdf";
     } else if (style === "model1") {
         outputFormat = "[YYYY]_[FamilyNameInitials]_[Extracted-Keywords].pdf";
         specificRules = "2. DELIMITERS: Use underscores (_) to separate major blocks. Use hyphens (-) to separate keywords. NEVER use spaces.\n3. FORMAT: Year _ Author FamilyName and Initials _ kebab-case keywords.\n4. VERSIONING: ONLY append a version (e.g., _V01, _V10Final) at the end IF explicitly mentioned in the input text.";
@@ -38,10 +38,10 @@ function getSystemPrompt(style) {
         outputFormat = "[YYYYMMDD]_[Event-or-Report-Description].pdf";
         specificRules = "2. DELIMITERS: Use underscores (_) to separate major blocks. Use hyphens (-) to separate words. NEVER use spaces.\n3. FORMAT: YYYYMMDD _ kebab-case description.\n4. VERSIONING: ONLY append a version at the end IF explicitly mentioned.";
         exampleOutput = "20260821_development-progress-report.pdf";
-    } else {
-        outputFormat = "[YYYY][AuthorLastName][Initials]-[keyword1]-[keyword2]-[keyword3].pdf";
-        specificRules = "2. FORMAT: 4-digit year, author's last name (capitalized), initials. ONE hyphen. Then 3-6 core keywords in LOWERCASE separated by hyphens (kebab-case).";
-        exampleOutput = "2015BelenzonS-social-context-ownership-family-firms.pdf";
+    } else { // default kebab (now snake_case)
+        outputFormat = "[YYYY]-[AuthorLastName][Initials]-[keyword1]_[keyword2]_[keyword3].pdf";
+        specificRules = "2. FORMAT: 4-digit year. ONE hyphen. Author's last name (capitalized), initials. ONE hyphen. Then 3-6 core keywords in LOWERCASE separated by underscores (snake_case).";
+        exampleOutput = "2015-BelenzonS-social_context_ownership_family_firms.pdf";
     }
 
     return `You are an expert Data Librarian and File Management AI. Your task is to rename document titles into strict, standardized file names based on institutional conventions.
@@ -216,10 +216,10 @@ function generateFallbackName(data, style, fileExt) {
     
     if (style === "pascal") {
         keywordsPart = cleanWordsArray.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).slice(0, 6).join('');
-        return `${dateStr}${cleanLastName}${initials}-${keywordsPart}.${fileExt}`;
+        return `${dateStr}-${cleanLastName}${initials}-${keywordsPart}.${fileExt}`;
     } else if (style === "date-kebab") {
         dateStr = data.full_date || `${data.year}0101`; 
-        keywordsPart = cleanWordsArray.map(w => w.toLowerCase()).slice(0, 6).join('-');
+        keywordsPart = cleanWordsArray.map(w => w.toLowerCase()).slice(0, 6).join('_');
         return `${dateStr}-${cleanLastName}${initials}-${keywordsPart}.${fileExt}`;
     } else if (style === "model1") {
         keywordsPart = cleanWordsArray.map(w => w.toLowerCase()).slice(0, 6).join('-');
@@ -233,8 +233,8 @@ function generateFallbackName(data, style, fileExt) {
         keywordsPart = cleanWordsArray.map(w => w.toLowerCase()).slice(0, 5).join('-');
         return `${dateStr}_${keywordsPart}_report.${fileExt}`;
     } else {
-        keywordsPart = cleanWordsArray.map(w => w.toLowerCase()).slice(0, 6).join('-');
-        return `${dateStr}${cleanLastName}${initials}-${keywordsPart}.${fileExt}`;
+        keywordsPart = cleanWordsArray.map(w => w.toLowerCase()).slice(0, 6).join('_');
+        return `${dateStr}-${cleanLastName}${initials}-${keywordsPart}.${fileExt}`;
     }
 }
 
@@ -271,6 +271,8 @@ async function callGemini(inputText, style) {
 async function generateFinalFilename(doi, isbn, text, originalFilename) {
     let fileExt = "pdf";
     let safeOriginalName = (originalFilename || "Unknown_File.pdf").split('?')[0]; 
+    try { safeOriginalName = decodeURIComponent(safeOriginalName); } catch(e) {}
+    
     const extMatch = safeOriginalName.match(/\.([a-zA-Z0-9]+)$/);
     if (extMatch) {
         const potentialExt = extMatch[1].toLowerCase();
@@ -299,7 +301,11 @@ async function generateFinalFilename(doi, isbn, text, originalFilename) {
             }
 
             if (!finalName && text) {
-                finalName = await callGemini(text, style);
+                let inputStr = text.substring(0, 3000);
+                if (safeOriginalName && safeOriginalName !== "Unknown_File.pdf") {
+                    inputStr = `Target Document Hint: ${safeOriginalName}\n\nContext Data:\n${inputStr}`;
+                }
+                finalName = await callGemini(inputStr, style);
             }
 
             if (finalName) {
@@ -370,10 +376,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         (async () => {
             try {
                 const safeUrl = message.url || "";
-                let originalFilename = "Unknown.pdf";
-                try { originalFilename = new URL(safeUrl).pathname.split('/').pop() || "Unknown.pdf"; } catch (e) { originalFilename = safeUrl.split('/').pop(); }
                 
-                const filename = await generateFinalFilename(message.doi, message.isbn, message.text, originalFilename);
+                let activeDoi = message.doi;
+                if (!activeDoi) {
+                    const urlDoiMatch = safeUrl.match(/\b(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)\b/i);
+                    if (urlDoiMatch) activeDoi = urlDoiMatch[1].replace(/[.;,]$/, '').replace(/\.pdf$/i, '');
+                }
+
+                let originalFilename = "Unknown.pdf";
+                try { 
+                    originalFilename = new URL(safeUrl).pathname.split('/').pop() || "Unknown.pdf"; 
+                } catch (e) { 
+                    originalFilename = safeUrl.split('/').pop(); 
+                }
+                try { originalFilename = decodeURIComponent(originalFilename); } catch(e){}
+                
+                const filename = await generateFinalFilename(activeDoi, message.isbn, message.text, originalFilename);
                 activeDownloads[safeUrl] = filename;
                 
                 try {
@@ -390,7 +408,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
     const targetUrl = item.url;
-    const finalUrl = item.finalUrl;
+    const finalUrl = item.finalUrl || targetUrl;
     let forcedName = activeDownloads[targetUrl] || (finalUrl && activeDownloads[finalUrl]);
     
     if (forcedName) {
@@ -413,19 +431,28 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
             
             if (!meta || (!meta.doi && !meta.isbn) || 
                (meta.doi === globalLastKnownMetadata.doi && meta.text && meta.text.length < 300)) {
-                meta = globalLastKnownMetadata;
+                meta = globalLastKnownMetadata || {};
             }
             
-            if (meta.doi || meta.isbn || item.filename.toLowerCase().endsWith('.pdf')) {
+            const urlDoiMatch = finalUrl.match(/\b(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)\b/i);
+            const extractedDoi = urlDoiMatch ? urlDoiMatch[1].replace(/[.;,]$/, '').replace(/\.pdf$/i, '') : null;
+            
+            const activeDoi = meta.doi || extractedDoi;
+            const activeIsbn = meta.isbn;
+            const activeText = meta.text;
+            
+            if (activeDoi || activeIsbn || item.filename.toLowerCase().endsWith('.pdf')) {
                 try {
                     const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 4000));
                     const filename = await Promise.race([
-                        generateFinalFilename(meta.doi, meta.isbn, meta.text, item.filename),
+                        generateFinalFilename(activeDoi, activeIsbn, activeText, item.filename),
                         timeoutPromise
                     ]);
                     suggest({ filename: filename, conflictAction: 'uniquify' });
                 } catch (e) { 
-                    const safeRawName = item.filename.replace(/[^a-zA-Z0-9.\-]/g, '_');
+                    let safeRawName = item.filename.split('?')[0];
+                    try { safeRawName = decodeURIComponent(safeRawName); } catch(err){}
+                    safeRawName = safeRawName.replace(/[^a-zA-Z0-9.\-]/g, ' ').replace(/\s+/g, ' ').trim();
                     suggest({ filename: `${folder}/${safeRawName}`, conflictAction: 'uniquify' }); 
                 }
             } else { suggest({ filename: item.filename }); }

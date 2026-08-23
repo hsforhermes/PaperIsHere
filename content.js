@@ -30,6 +30,21 @@ function extractDoiStrict() {
             return urlMatch[1].replace(/[.;,]$/, '');
         }
     }
+
+    // --- NEW: Google Scholar Explicit DOI Extraction ---
+    if (window.location.hostname.includes('scholar.google.com')) {
+        const urlParams = new URLSearchParams(window.location.search);
+        const q = urlParams.get('q') || '';
+        const qMatch = q.match(/\b(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)\b/i);
+        if (qMatch) return qMatch[1].replace(/[.;,]$/, '');
+        
+        const searchInput = document.querySelector('input[name="q"]');
+        if (searchInput && searchInput.value) {
+            const inputMatch = searchInput.value.match(/\b(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)\b/i);
+            if (inputMatch) return inputMatch[1].replace(/[.;,]$/, '');
+        }
+    }
+    
     return null;
 }
 
@@ -42,6 +57,17 @@ function extractIsbnStrict() {
         if (isbn13Match) return isbn13Match[1].replace(/[^0-9]/g, '');
     }
     return null;
+}
+
+// --- NEW: Clean Text Extraction for Scholar AI Accuracy ---
+function extractPageTextStrict() {
+    if (window.location.hostname.includes("scholar.google.com")) {
+        const results = document.querySelectorAll('.gs_ri');
+        if (results.length > 0) {
+            return Array.from(results).map(r => r.innerText).join('\n\n').substring(0, 3000);
+        }
+    }
+    return document.body ? document.body.innerText.substring(0, 3000) : "";
 }
 
 function isRestrictedAccess() {
@@ -66,9 +92,7 @@ function isRestrictedAccess() {
         return false; 
     }
 
-    if (isWiley && !hasOABadge) {
-        return true; 
-    }
+    if (isWiley && !hasOABadge) return true; 
 
     if (document.querySelector('.access-icon.restricted, img[alt*="Restricted"], [data-access-type="restricted"], .icon-lock')) {
         return true;
@@ -204,7 +228,7 @@ async function injectButtons() {
     container.style.cssText = "position:fixed; bottom:30px; left:30px; z-index:9999999; display:flex; flex-direction:column; pointer-events:none;";
 
     if (publisherPdfUrl && !isPublisherViewerPage) {
-        const btn = createDownloadButton("Open PDF (Direct)", publisherPdfUrl, directIcon, "blank", "#000000", "#10B981");
+        const btn = createDownloadButton("Save PDF (Direct)", publisherPdfUrl, directIcon, "bypass", "#000000", "#10B981");
         btn.style.order = "1";
         container.appendChild(btn);
     } else if (publisherPdfUrl && isPublisherViewerPage) {
@@ -217,7 +241,7 @@ async function injectButtons() {
     if (doi && !isPublisherViewerPage) {
         chrome.runtime.sendMessage({ action: "checkUnpaywall", doi: doi }, (response) => {
             if (response && response.url) {
-                const btn = createDownloadButton("Open PDF (Unpaywall)", response.url, directIcon, "blank", "#000000", "#10B981");
+                const btn = createDownloadButton("Save PDF (Unpaywall)", response.url, directIcon, "bypass", "#000000", "#10B981");
                 btn.style.order = "2";
                 container.appendChild(btn);
             }
@@ -262,7 +286,7 @@ async function injectButtons() {
 function initializeExtension() {
     doi = extractDoiStrict();
     isbn = extractIsbnStrict();
-    pageText = document.body ? document.body.innerText.substring(0, 3000) : "";
+    pageText = extractPageTextStrict();
     articleTitle = document.querySelector('meta[name="citation_title"], meta[name="DC.Title"], meta[name="prism.title"]')?.content || null;
     publisherPdfUrl = extractNativePdfUrlStrict();
 
@@ -279,3 +303,49 @@ new MutationObserver(() => {
         setTimeout(initializeExtension, 800); 
     }
 }).observe(document.body, { childList: true, subtree: true });
+
+document.addEventListener('click', function(e) {
+    const aTag = e.target.closest('a');
+    if (!aTag || !aTag.href) return;
+    
+    if (aTag.hasAttribute('onclick') && aTag.getAttribute('onclick').includes('initiateDirectDownload')) return;
+
+    const href = aTag.href.toLowerCase();
+    const isPdfLink = href.endsWith('.pdf') || href.includes('/doi/pdf/') || href.includes('/doi/epdf/');
+    const isScholarPdf = window.location.hostname.includes('scholar.google.com') && 
+                         (aTag.innerText.includes('[PDF]') || 
+                          aTag.querySelector('.gs_ctg2') || 
+                          aTag.closest('.gs_or_ggsm') || 
+                          href.endsWith('.pdf'));
+
+    if ((isPdfLink || isScholarPdf) && href.startsWith('http')) {
+        if (checkIsSciHub() || window.location.hostname.includes('libgen')) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        const originalHTML = aTag.innerHTML;
+        aTag.innerHTML = `<span style="color:#7851A9; font-weight:bold; background:#f0f0f0; padding:2px 4px; border-radius:4px;">⏳ AI SAVING...</span>`;
+        
+        const originalPointerEvents = aTag.style.pointerEvents;
+        aTag.style.pointerEvents = "none";
+
+        chrome.runtime.sendMessage({
+            action: "triggerDirectDownload",
+            url: aTag.href,
+            doi: doi, 
+            isbn: isbn,
+            text: pageText
+        }, (response) => {
+            if (chrome.runtime.lastError || !response || !response.success) {
+                aTag.innerHTML = `<span style="color:red; font-weight:bold; background:#fff0f0; padding:2px 4px; border-radius:4px;">✖ FAILED</span>`;
+            } else {
+                aTag.innerHTML = `<span style="color:green; font-weight:bold; background:#f0fff0; padding:2px 4px; border-radius:4px;">✔ SAVED!</span>`;
+            }
+            setTimeout(() => {
+                aTag.innerHTML = originalHTML;
+                aTag.style.pointerEvents = originalPointerEvents;
+            }, 3000);
+        });
+    }
+}, true);

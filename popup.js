@@ -1,6 +1,8 @@
 document.addEventListener('DOMContentLoaded', () => {
     const saveLocationInput = document.getElementById('saveLocation');
     const namingStyleHidden = document.getElementById('namingStyle');
+    const sciHubInput = document.getElementById('sciHubDomain');
+    const libgenInput = document.getElementById('libgenDomain');
     const nexusBotInput = document.getElementById('nexusBot');
     const apiKeyInput = document.getElementById('apiKey');
     
@@ -57,8 +59,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    chrome.storage.local.get(['saveFolder', 'namingStyle', 'nexusBotUsername', 'geminiApiKey'], (result) => {
+    chrome.storage.local.get(['saveFolder', 'namingStyle', 'sciHubDomain', 'libgenDomain', 'nexusBotUsername', 'geminiApiKey'], (result) => {
         saveLocationInput.value = result.saveFolder || 'Renamed Papers';
+        if (result.sciHubDomain) sciHubInput.value = result.sciHubDomain;
+        if (result.libgenDomain) libgenInput.value = result.libgenDomain;
         nexusBotInput.value = result.nexusBotUsername || 'sks7777777nexusbot';
         if (result.geminiApiKey) apiKeyInput.value = result.geminiApiKey;
         
@@ -76,12 +80,20 @@ document.addEventListener('DOMContentLoaded', () => {
         let folder = saveLocationInput.value.trim().replace(/^\/|\/$/g, '').replace(/[<>:"|?*]/g, '');
         if (!folder) folder = 'Renamed Papers';
         
+        let sciHub = sciHubInput.value.trim().replace(/\/$/, '');
+        if (!sciHub) sciHub = "https://sci-hub.st";
+
+        let libgen = libgenInput.value.trim().replace(/\/$/, '');
+        if (!libgen) libgen = "https://libgen.li";
+
         let nexus = nexusBotInput.value.trim().replace('@', '');
         if (!nexus) nexus = 'sks7777777nexusbot';
         
         chrome.storage.local.set({ 
             saveFolder: folder,
             namingStyle: namingStyleHidden.value,
+            sciHubDomain: sciHub,
+            libgenDomain: libgen,
             nexusBotUsername: nexus,
             geminiApiKey: apiKeyInput.value.trim()
         }, () => {

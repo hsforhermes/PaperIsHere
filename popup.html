@@ -25,7 +25,14 @@
     input::placeholder { color: #888888; font-weight: 500; }
     input:focus { border-color: var(--purple); box-shadow: 3px 3px 0px var(--purple); }
     
-    .custom-select-wrapper { margin-bottom: 20px; display: flex; flex-direction: column; }
+    .hint-link {
+      display: block; font-size: 9px; font-weight: 800; text-transform: uppercase;
+      text-decoration: none; color: var(--gray); margin-top: -16px; margin-bottom: 20px;
+      text-align: right; transition: color 0.2s;
+    }
+    .hint-link:hover { color: var(--purple); }
+    
+    .custom-select-wrapper { margin-bottom: 20px; display: flex; flex-direction: column; position: relative; user-select: none; }
     .custom-select {
       display: flex; justify-content: space-between; align-items: center;
       padding: 14px 12px; font-size: 13px; font-weight: 600; font-family: 'Courier New', Courier, monospace;
@@ -57,6 +64,10 @@
     button:hover { background-color: var(--purple); color: var(--white); border-color: var(--black); box-shadow: 4px 4px 0px var(--black); }
     button:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0px var(--black); }
     #status { font-size: 11px; font-weight: 900; text-align: center; text-transform: uppercase; height: 16px; color: var(--purple); margin-top: 14px; }
+    
+    .footer-link { text-align: center; margin-top: 20px; }
+    .footer-link a { font-size: 10px; font-weight: 900; text-transform: uppercase; text-decoration: none; color: var(--black); border-bottom: 2px solid var(--black); padding-bottom: 2px; transition: all 0.2s; }
+    .footer-link a:hover { color: var(--purple); border-color: var(--purple); }
   </style>
 </head>
 <body>
@@ -73,13 +84,13 @@
   <label>Naming Format</label>
   <div class="custom-select-wrapper" id="namingDropdown">
     <div class="custom-select">
-      <span class="custom-select-trigger">YYYYName-kebab-case</span>
+      <span class="custom-select-trigger">YYYY-Name-snake_case</span>
       <span class="custom-select-arrow">▼</span>
     </div>
     <div class="custom-options">
-      <div class="custom-option" data-value="kebab">YYYYName-kebab-case</div>
-      <div class="custom-option" data-value="pascal">YYYYName-PascalCase</div>
-      <div class="custom-option" data-value="date-kebab">YYYYMMDD-Name-kebab</div>
+      <div class="custom-option" data-value="kebab">YYYY-Name-snake_case</div>
+      <div class="custom-option" data-value="pascal">YYYY-Name-PascalCase</div>
+      <div class="custom-option" data-value="date-kebab">YYYYMMDD-Name-snake_case</div>
       <div class="custom-option" data-value="model1">Academic_YYYY_Name_Keyword</div>
       <div class="custom-option" data-value="model2">Project_YYYYMMDD_Keyword</div>
       <div class="custom-option" data-value="model3">Report_YYYYMMDD_Keyword</div>
@@ -92,6 +103,14 @@
   </div>
 
   <div id="advancedOptions">
+      <label>Sci-Hub Domain</label>
+      <input type="text" id="sciHubDomain" placeholder="https://sci-hub.st">
+      <a href="https://sci-hub.pub" target="_blank" class="hint-link">Find active Sci-Hub mirrors ↗</a>
+
+      <label>LibGen Domain</label>
+      <input type="text" id="libgenDomain" placeholder="https://libgen.li">
+      <a href="https://librarygenesis.net" target="_blank" class="hint-link">Find active LibGen mirrors ↗</a>
+
       <label>Nexus Bot (Telegram)</label>
       <input type="text" id="nexusBot" placeholder="sks7777777nexusbot">
       
@@ -102,6 +121,10 @@
   <button id="saveBtn">Save Settings</button>
   <div id="status"></div>
   
+  <div class="footer-link">
+    <a href="https://github.com/hsforhermes/PaperIsHere" target="_blank">View on GitHub</a>
+  </div>
+
   <script src="popup.js"></script>
 </body>
 </html>
