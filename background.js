@@ -1,5 +1,5 @@
 let currentTabMetadata = {};
-let globalLastKnownMetadata = { doi: null, isbn: null, text: null };
+let globalLastKnownMetadata = { doi: null, isbn: null, text: null, title: null };
 let activeDownloads = {}; 
 
 const STOP_WORDS = [
@@ -11,12 +11,26 @@ const STOP_WORDS = [
 const fallbackSciHubs = ["https://sci-hub.st", "https://sci-hub.ru", "https://sci-hub.se"];
 const fallbackLibgens = ["https://libgen.li", "https://libgen.vg", "https://libgen.rs"];
 
+async function systemLog(type, msg, details = {}) {
+    let cleanDetails = JSON.stringify(details);
+    cleanDetails = cleanDetails.replace(/key=[a-zA-Z0-9_-]+/g, 'key=AIzaSy***_HIDDEN_***');
+    
+    const logEntry = `[${new Date().toISOString()}] [${type}] ${msg} | Details: ${cleanDetails}`;
+    
+    chrome.storage.local.get(['systemLogs'], (res) => {
+        let logs = res.systemLogs || [];
+        logs.push(logEntry);
+        if (logs.length > 10) logs.shift();
+        chrome.storage.local.set({ systemLogs: logs });
+    });
+}
+
 function getSystemPrompt(style) {
     let outputFormat = "";
     let specificRules = "";
     let exampleOutput = "";
 
-    const SMART_KEYWORD_RULE = "CRITICAL KEYWORD EXTRACTION ALGORITHM:\nStep 1: Identify the academic field (e.g., Strategic Management, Economics) from the context.\nStep 2: Scan the input for Author-Provided Keywords or classifications (e.g., JEL).\nStep 3: Extract ONLY the core scientific variables, theoretical contexts, and target populations (e.g., 'ownership', 'family-firms', 'social-context').\nStep 4: STRICTLY EXCLUDE metaphorical phrases (e.g., 'married to the firm'), generic study words ('investigation', 'large-scale', 'evidence', 'study', 'analysis', 'effect', 'impact'), and prepositions.";
+    const SMART_KEYWORD_RULE = "CRITICAL KEYWORD EXTRACTION ALGORITHM:\nStep 1: Identify the academic field (e.g., Strategic Management, Economics) from the context.\nStep 2: Scan the input for Author-Provided Keywords or classifications (e.g., JEL).\nStep 3: Extract ONLY the core scientific variables, theoretical contexts, and target populations (e.g., 'ownership', 'family-firms', 'social-context').\nStep 4: STRICTLY EXCLUDE metaphorical phrases (e.g., 'married to the firm'), generic study words ('investigation', 'large-scale', 'evidence', 'study', 'analysis', 'effect', 'impact'), and prepositions.\nStep 5: If the year is missing, use '0000'. NEVER output the word 'null' or 'undefined'.";
 
     if (style === "pascal") {
         outputFormat = "[YYYY]-[AuthorLastName][Initials]-[Keyword1Keyword2Keyword3].pdf";
@@ -38,7 +52,7 @@ function getSystemPrompt(style) {
         outputFormat = "[YYYYMMDD]_[Event-or-Report-Description].pdf";
         specificRules = "2. DELIMITERS: Use underscores (_) to separate major blocks. Use hyphens (-) to separate words. NEVER use spaces.\n3. FORMAT: YYYYMMDD _ kebab-case description.\n4. VERSIONING: ONLY append a version at the end IF explicitly mentioned.";
         exampleOutput = "20260821_development-progress-report.pdf";
-    } else { // default kebab (now snake_case)
+    } else { 
         outputFormat = "[YYYY]-[AuthorLastName][Initials]-[keyword1]_[keyword2]_[keyword3].pdf";
         specificRules = "2. FORMAT: 4-digit year. ONE hyphen. Author's last name (capitalized), initials. ONE hyphen. Then 3-6 core keywords in LOWERCASE separated by underscores (snake_case).";
         exampleOutput = "2015-BelenzonS-social_context_ownership_family_firms.pdf";
@@ -175,10 +189,13 @@ async function getCrossref(doi) {
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 6000);
-        const response = await fetch(`https://api.crossref.org/works/${doi}?mailto=researcher@example.com`, { signal: controller.signal });
+        const response = await fetch(`https://api.crossref.org/works/${encodeURIComponent(doi)}?mailto=researcher@example.com`, { signal: controller.signal });
         clearTimeout(timeoutId);
         
-        if (!response.ok) return null;
+        if (!response.ok) {
+            systemLog("CROSSREF_FAIL", `Response not OK: ${response.status}`, { doi });
+            return null;
+        }
         const json = await response.json();
         const item = json.message;
         
@@ -187,13 +204,15 @@ async function getCrossref(doi) {
                      || item.issued?.['date-parts']?.[0] 
                      || item.created?.['date-parts']?.[0];
         
-        let year = "", month = "01", day = "01", full_date = "";
-        if (dateParts) {
+        let year = "0000", month = "01", day = "01", full_date = "";
+        
+        if (dateParts && dateParts[0] != null) {
             year = String(dateParts[0]);
-            if (dateParts[1]) month = String(dateParts[1]).padStart(2, '0');
-            if (dateParts[2]) day = String(dateParts[2]).padStart(2, '0');
-            full_date = `${year}${month}${day}`;
+            if (year === "null" || year === "undefined") year = "0000";
+            if (dateParts[1] != null) month = String(dateParts[1]).padStart(2, '0');
+            if (dateParts[2] != null) day = String(dateParts[2]).padStart(2, '0');
         }
+        full_date = `${year}${month}${day}`;
         
         const author = item.author?.[0] || {};
         const title = item.title?.[0]?.replace(/<[^>]+>/g, '') || "";
@@ -201,7 +220,10 @@ async function getCrossref(doi) {
         if (year && author.family && title) {
             return { year: year, full_date: full_date, last_name: author.family, other_names: author.given || "", title: title };
         }
-    } catch (error) { return null; }
+    } catch (error) { 
+        systemLog("CROSSREF_ERROR", error.message, { doi });
+        return null; 
+    }
     return null;
 }
 
@@ -209,7 +231,9 @@ function generateFallbackName(data, style, fileExt) {
     let cleanLastName = data.last_name.replace(/[^a-zA-Z]/g, '');
     cleanLastName = cleanLastName.charAt(0).toUpperCase() + cleanLastName.slice(1).toLowerCase();
     const initials = getInitials(data.other_names);
-    let dateStr = data.year;
+    
+    let dateStr = data.year || "0000";
+    if (dateStr === "null" || dateStr === "undefined") dateStr = "0000";
     
     let cleanWordsArray = smartTokenizeAndFilter(data.title);
     let keywordsPart = "";
@@ -218,21 +242,24 @@ function generateFallbackName(data, style, fileExt) {
         keywordsPart = cleanWordsArray.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).slice(0, 6).join('');
         return `${dateStr}-${cleanLastName}${initials}-${keywordsPart}.${fileExt}`;
     } else if (style === "date-kebab") {
-        dateStr = data.full_date || `${data.year}0101`; 
+        let fDate = data.full_date || "00000101";
+        if (fDate.includes("null") || fDate.includes("undefined")) fDate = "00000101";
         keywordsPart = cleanWordsArray.map(w => w.toLowerCase()).slice(0, 6).join('_');
-        return `${dateStr}-${cleanLastName}${initials}-${keywordsPart}.${fileExt}`;
+        return `${fDate}-${cleanLastName}${initials}-${keywordsPart}.${fileExt}`;
     } else if (style === "model1") {
         keywordsPart = cleanWordsArray.map(w => w.toLowerCase()).slice(0, 6).join('-');
         return `${dateStr}_${cleanLastName}${initials}_${keywordsPart}.${fileExt}`;
     } else if (style === "model2") {
-        dateStr = data.full_date || `${data.year}0101`; 
+        let fDate = data.full_date || "00000101";
+        if (fDate.includes("null") || fDate.includes("undefined")) fDate = "00000101";
         keywordsPart = cleanWordsArray.map(w => w.toLowerCase()).slice(0, 5).join('-');
-        return `${dateStr}_${keywordsPart}_document.${fileExt}`;
+        return `${fDate}_${keywordsPart}_document.${fileExt}`;
     } else if (style === "model3") {
-        dateStr = data.full_date || `${data.year}0101`; 
+        let fDate = data.full_date || "00000101";
+        if (fDate.includes("null") || fDate.includes("undefined")) fDate = "00000101";
         keywordsPart = cleanWordsArray.map(w => w.toLowerCase()).slice(0, 5).join('-');
-        return `${dateStr}_${keywordsPart}_report.${fileExt}`;
-    } else {
+        return `${fDate}_${keywordsPart}_report.${fileExt}`;
+    } else { 
         keywordsPart = cleanWordsArray.map(w => w.toLowerCase()).slice(0, 6).join('_');
         return `${dateStr}-${cleanLastName}${initials}-${keywordsPart}.${fileExt}`;
     }
@@ -242,7 +269,10 @@ async function callGemini(inputText, style) {
     return new Promise((resolve) => {
         chrome.storage.local.get(['geminiApiKey'], async (result) => {
             const apiKey = result.geminiApiKey;
-            if (!apiKey) return resolve(null);
+            if (!apiKey) {
+                systemLog("GEMINI_SKIP", "No API Key provided", {});
+                return resolve(null);
+            }
 
             const finalPrompt = `${getSystemPrompt(style)}\n\nInput: ${inputText.substring(0, 4000)}`;
 
@@ -256,19 +286,33 @@ async function callGemini(inputText, style) {
                     signal: controller.signal
                 });
                 clearTimeout(timeoutId);
+                
+                if (!apiResponse.ok) {
+                    systemLog("GEMINI_HTTP_ERROR", `Status: ${apiResponse.status}`, {});
+                    return resolve(null);
+                }
+
                 const data = await apiResponse.json();
                 
                 let aiResult = String(data.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
                 aiResult = aiResult.replace(/```/g, '').replace(/json/gi, '').trim();
                 
-                if (aiResult.length > 5) resolve(aiResult);
-                else resolve(null);
-            } catch (error) { resolve(null); }
+                if (aiResult.length > 5) {
+                    aiResult = aiResult.replace(/null/gi, '0000');
+                    resolve(aiResult);
+                } else {
+                    systemLog("GEMINI_EMPTY", "AI returned too short or empty result", { response: aiResult });
+                    resolve(null);
+                }
+            } catch (error) { 
+                systemLog("GEMINI_FETCH_FAIL", error.message, {});
+                resolve(null); 
+            }
         });
     });
 }
 
-async function generateFinalFilename(doi, isbn, text, originalFilename) {
+async function generateFinalFilename(doi, isbn, text, originalFilename, title) {
     let fileExt = "pdf";
     let safeOriginalName = (originalFilename || "Unknown_File.pdf").split('?')[0]; 
     try { safeOriginalName = decodeURIComponent(safeOriginalName); } catch(e) {}
@@ -294,16 +338,21 @@ async function generateFinalFilename(doi, isbn, text, originalFilename) {
             if (!finalName && doi) {
                 crossrefData = await getCrossref(doi);
                 if (crossrefData) {
-                    const structuredInput = `Title: "${crossrefData.title}"\nAuthor: ${crossrefData.last_name}, ${crossrefData.other_names}\nDate: ${crossrefData.full_date || crossrefData.year}\nContext: ${text.substring(0, 1500)}`;
+                    const structuredInput = `Title: "${crossrefData.title}"\nAuthor: ${crossrefData.last_name}, ${crossrefData.other_names}\nDate: ${crossrefData.full_date || crossrefData.year}\nDOI: ${doi}\nContext: ${text.substring(0, 1500)}`;
                     finalName = await callGemini(structuredInput, style);
                     if (!finalName) finalName = generateFallbackName(crossrefData, style, fileExt);
                 }
             }
 
-            if (!finalName && text) {
-                let inputStr = text.substring(0, 3000);
+            if (!finalName && (text || title)) {
+                let inputStr = "";
+                if (title) inputStr += `Document Title: ${title}\n`;
+                if (doi) inputStr += `Document DOI: ${doi}\n`;
                 if (safeOriginalName && safeOriginalName !== "Unknown_File.pdf") {
-                    inputStr = `Target Document Hint: ${safeOriginalName}\n\nContext Data:\n${inputStr}`;
+                    inputStr += `Target Document Hint: ${safeOriginalName}\n`;
+                }
+                if (text) {
+                    inputStr += `\nContext Data:\n${text.substring(0, 2500)}`;
                 }
                 finalName = await callGemini(inputStr, style);
             }
@@ -312,6 +361,7 @@ async function generateFinalFilename(doi, isbn, text, originalFilename) {
                 finalName = finalName.replace(/\.pdf$/i, '') + `.${fileExt}`;
                 resolve(`${folder}/${finalName}`);
             } else {
+                systemLog("NAMING_FALLBACK", "Using original fallback name", { doi, original: safeOriginalName });
                 let fallbackName = safeOriginalName.replace(/[^a-zA-Z0-9.\-]/g, ' ').replace(/\s+/g, ' ').trim();
                 if (!fallbackName.includes('.')) fallbackName += `.${fileExt}`;
                 resolve(`${folder}/${fallbackName}`);
@@ -329,32 +379,53 @@ async function fallbackBlobDownload(url, filename, sendResponse) {
         
         if (!response.ok) throw new Error(`HTTP_${response.status}`);
         const blob = await response.blob();
-        if (blob.size < 5000) throw new Error("FILE_TOO_SMALL");
+        
+        if (blob.type.includes('text/html') || blob.size < 5000) {
+            systemLog("BLOB_HTML_REJECT", "Fetched file is HTML landing page, not PDF", { url, type: blob.type });
+            throw new Error("HTML_LANDING_PAGE_REJECTED");
+        }
         
         const reader = new FileReader();
         reader.onloadend = function() {
             chrome.downloads.download({ url: reader.result, filename: filename, saveAs: false }, (downloadId) => {
                 if (downloadId) sendResponse({ success: true, filename: filename });
-                else sendResponse({ success: false, error: "CHROME_BLOCKED" });
+                else {
+                    systemLog("CHROME_BLOCKED", "Blob download blocked by Chrome", { url });
+                    sendResponse({ success: false, error: "CHROME_BLOCKED" });
+                }
             });
         };
         reader.readAsDataURL(blob);
     } catch (error) {
+        systemLog("BLOB_FAIL", error.message, { url });
         sendResponse({ success: false, error: error.name === "AbortError" ? "TIMEOUT" : error.message });
     }
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.action === "logError") {
+        systemLog(message.type, message.message, message.details);
+        return true;
+    }
+
+    if (message.action === "getLogsForReport") {
+        chrome.storage.local.get(['systemLogs'], (res) => {
+            const logs = (res.systemLogs || []).join('\n');
+            sendResponse({ logs: logs });
+        });
+        return true;
+    }
+
     if (message.action === "storeMetadata" && sender.tab) {
-        currentTabMetadata[sender.tab.id] = { doi: message.doi, isbn: message.isbn, text: message.text };
+        currentTabMetadata[sender.tab.id] = { doi: message.doi, isbn: message.isbn, text: message.text, title: message.title };
         
-        if (message.doi || message.isbn) {
+        if (message.doi || message.isbn || message.title) {
             const isSamePaper = (message.doi === globalLastKnownMetadata.doi) || (message.isbn === globalLastKnownMetadata.isbn);
             const isPoorText = (!message.text || message.text.length < 300);
             const hasRichGlobal = (globalLastKnownMetadata.text && globalLastKnownMetadata.text.length >= 300);
             
             if (!(isSamePaper && isPoorText && hasRichGlobal)) {
-                globalLastKnownMetadata = { doi: message.doi, isbn: message.isbn, text: message.text };
+                globalLastKnownMetadata = { doi: message.doi, isbn: message.isbn, text: message.text, title: message.title };
             }
         }
     }
@@ -391,22 +462,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 }
                 try { originalFilename = decodeURIComponent(originalFilename); } catch(e){}
                 
-                const filename = await generateFinalFilename(activeDoi, message.isbn, message.text, originalFilename);
+                const filename = await generateFinalFilename(activeDoi, message.isbn, message.text, originalFilename, message.title);
                 activeDownloads[safeUrl] = filename;
                 
                 try {
                     chrome.downloads.download({ url: safeUrl, saveAs: false }, (downloadId) => {
-                        if (chrome.runtime.lastError || !downloadId) fallbackBlobDownload(safeUrl, filename, sendResponse);
-                        else sendResponse({ success: true, filename: filename });
+                        if (chrome.runtime.lastError || !downloadId) {
+                            systemLog("CHROME_DL_ERROR", chrome.runtime.lastError?.message || "No download ID", { safeUrl });
+                            fallbackBlobDownload(safeUrl, filename, sendResponse);
+                        } else {
+                            sendResponse({ success: true, filename: filename });
+                        }
                     });
-                } catch (syncError) { fallbackBlobDownload(safeUrl, filename, sendResponse); }
-            } catch (error) { sendResponse({ success: false, error: error.message }); }
+                } catch (syncError) { 
+                    systemLog("SYNC_ERROR", syncError.message, { safeUrl });
+                    fallbackBlobDownload(safeUrl, filename, sendResponse); 
+                }
+            } catch (error) { 
+                systemLog("TRIGGER_FAIL", error.message, {});
+                sendResponse({ success: false, error: error.message }); 
+            }
         })();
         return true; 
     }
 });
 
 chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+    
+    // HTML SHIELD - Ignore Scholar search results and native Libgen HTML redirects
+    if (item.mime === 'text/html' && !item.url.includes('[google.com/scholar](https://google.com/scholar)') && !item.url.includes('libgen')) {
+        chrome.downloads.cancel(item.id);
+        systemLog("HTML_CANCELLED", "Prevented HTML landing page from saving as PDF", { url: item.url });
+        return true;
+    }
+
     const targetUrl = item.url;
     const finalUrl = item.finalUrl || targetUrl;
     let forcedName = activeDownloads[targetUrl] || (finalUrl && activeDownloads[finalUrl]);
@@ -429,8 +518,8 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
             const tabId = tabs[0]?.id;
             let meta = currentTabMetadata[tabId];
             
-            if (!meta || (!meta.doi && !meta.isbn) || 
-               (meta.doi === globalLastKnownMetadata.doi && meta.text && meta.text.length < 300)) {
+            if (!meta || (!meta.doi && !meta.isbn && !meta.title) || 
+               (meta.doi === globalLastKnownMetadata.doi && (!meta.text || meta.text.length < 300))) {
                 meta = globalLastKnownMetadata || {};
             }
             
@@ -440,16 +529,18 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
             const activeDoi = meta.doi || extractedDoi;
             const activeIsbn = meta.isbn;
             const activeText = meta.text;
+            const activeTitle = meta.title;
             
             if (activeDoi || activeIsbn || item.filename.toLowerCase().endsWith('.pdf')) {
                 try {
                     const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 4000));
                     const filename = await Promise.race([
-                        generateFinalFilename(activeDoi, activeIsbn, activeText, item.filename),
+                        generateFinalFilename(activeDoi, activeIsbn, activeText, item.filename, activeTitle),
                         timeoutPromise
                     ]);
                     suggest({ filename: filename, conflictAction: 'uniquify' });
                 } catch (e) { 
+                    systemLog("SUGGEST_FAIL", e.message, { file: item.filename });
                     let safeRawName = item.filename.split('?')[0];
                     try { safeRawName = decodeURIComponent(safeRawName); } catch(err){}
                     safeRawName = safeRawName.replace(/[^a-zA-Z0-9.\-]/g, ' ').replace(/\s+/g, ' ').trim();

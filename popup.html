@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <title>PaperIsHere Settings</title>
   <style>
-    :root { --black: #000000; --white: #ffffff; --purple: #7851A9; --gray: #666666; }
+    :root { --black: #000000; --white: #ffffff; --purple: #7851A9; --gray: #666666; --red: #e63946; }
     body {
       font-family: 'Helvetica Neue', Arial, sans-serif; background-color: var(--white);
       color: var(--black); padding: 24px; width: 320px; margin: 0; box-sizing: border-box;
@@ -63,6 +63,10 @@
     button { width: 100%; padding: 14px; font-size: 14px; font-weight: 900; background-color: var(--white); color: var(--black); border: 2px solid var(--black); border-radius: 0; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; box-shadow: 4px 4px 0px var(--black); transition: all 0.1s ease; margin-top: 8px; }
     button:hover { background-color: var(--purple); color: var(--white); border-color: var(--black); box-shadow: 4px 4px 0px var(--black); }
     button:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0px var(--black); }
+    
+    .report-btn { background-color: var(--white); color: var(--red); border-color: var(--red); box-shadow: 4px 4px 0px var(--red); margin-top: 24px; }
+    .report-btn:hover { background-color: var(--red); color: var(--white); border-color: var(--black); box-shadow: 4px 4px 0px var(--black); }
+    
     #status { font-size: 11px; font-weight: 900; text-align: center; text-transform: uppercase; height: 16px; color: var(--purple); margin-top: 14px; }
     
     .footer-link { text-align: center; margin-top: 20px; }
@@ -111,11 +115,16 @@
       <input type="text" id="libgenDomain" placeholder="https://libgen.li">
       <a href="https://librarygenesis.net" target="_blank" class="hint-link">Find active LibGen mirrors ↗</a>
 
+      <label>Anna's Archive Domain</label>
+      <input type="text" id="annasDomain" placeholder="https://annas-archive.org">
+
       <label>Nexus Bot (Telegram)</label>
       <input type="text" id="nexusBot" placeholder="sks7777777nexusbot">
       
       <label>Gemini API Key</label>
       <input type="password" id="apiKey" placeholder="Insert Key...">
+      
+      <button id="reportIssueBtn" class="report-btn">Report Issue / Bug</button>
   </div>
   
   <button id="saveBtn">Save Settings</button>
