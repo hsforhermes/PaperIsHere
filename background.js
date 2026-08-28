@@ -431,7 +431,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     
     if (message.action === "checkUnpaywall") {
-        fetch(`[https://api.unpaywall.org/v2/$](https://api.unpaywall.org/v2/$){message.doi}?email=researcher@example.com`)
+        fetch(`https://api.unpaywall.org/v2/${message.doi}?email=researcher@example.com`)
             .then(res => res.json())
             .then(data => sendResponse({ url: data.best_oa_location?.url_for_pdf }))
             .catch(() => sendResponse({ url: null }));
@@ -490,7 +490,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
     
     // HTML SHIELD - Ignore Scholar search results and native Libgen HTML redirects
-    if (item.mime === 'text/html' && !item.url.includes('[google.com/scholar](https://google.com/scholar)') && !item.url.includes('libgen')) {
+    if (item.mime === 'text/html' && !item.url.includes('google.com/scholar') && !item.url.includes('libgen')) {
         chrome.downloads.cancel(item.id);
         systemLog("HTML_CANCELLED", "Prevented HTML landing page from saving as PDF", { url: item.url });
         return true;

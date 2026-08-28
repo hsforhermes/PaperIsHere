@@ -1,6 +1,8 @@
 document.addEventListener('DOMContentLoaded', () => {
     const saveLocationInput = document.getElementById('saveLocation');
     const namingStyleHidden = document.getElementById('namingStyle');
+    const fabEnabledHidden = document.getElementById('fabEnabled');
+    const fabPositionHidden = document.getElementById('fabPosition');
     const sciHubInput = document.getElementById('sciHubDomain');
     const libgenInput = document.getElementById('libgenDomain');
     const annasInput = document.getElementById('annasDomain');
@@ -14,35 +16,91 @@ document.addEventListener('DOMContentLoaded', () => {
     const toggleText = toggleAdvancedBtn.querySelector('span');
     const advancedOptionsDiv = document.getElementById('advancedOptions');
     
-    const dropdownWrapper = document.getElementById('namingDropdown');
-    const selectBox = dropdownWrapper.querySelector('.custom-select');
-    const selectTrigger = dropdownWrapper.querySelector('.custom-select-trigger');
-    const optionsContainer = dropdownWrapper.querySelector('.custom-options');
-    const optionsList = dropdownWrapper.querySelectorAll('.custom-option');
+    const namingDropdownWrapper = document.getElementById('namingDropdown');
+    const namingSelectBox = namingDropdownWrapper.querySelector('.custom-select');
+    const namingSelectTrigger = namingDropdownWrapper.querySelector('.custom-select-trigger');
+    const namingOptionsContainer = namingDropdownWrapper.querySelector('.custom-options');
+    const namingOptionsList = namingDropdownWrapper.querySelectorAll('.custom-option');
 
-    selectBox.addEventListener('click', (e) => {
+    const fabEnabledDropdownWrapper = document.getElementById('fabEnabledDropdown');
+    const fabEnabledSelectBox = fabEnabledDropdownWrapper.querySelector('.custom-select');
+    const fabEnabledSelectTrigger = fabEnabledDropdownWrapper.querySelector('.custom-select-trigger');
+    const fabEnabledOptionsContainer = fabEnabledDropdownWrapper.querySelector('.custom-options');
+    const fabEnabledOptionsList = fabEnabledDropdownWrapper.querySelectorAll('.custom-option');
+
+    const fabPositionDropdownWrapper = document.getElementById('fabPositionDropdown');
+    const fabPositionSelectBox = fabPositionDropdownWrapper.querySelector('.custom-select');
+    const fabPositionSelectTrigger = fabPositionDropdownWrapper.querySelector('.custom-select-trigger');
+    const fabPositionOptionsContainer = fabPositionDropdownWrapper.querySelector('.custom-options');
+    const fabPositionOptionsList = fabPositionDropdownWrapper.querySelectorAll('.custom-option');
+
+    namingSelectBox.addEventListener('click', (e) => {
         e.stopPropagation();
-        optionsContainer.classList.toggle('open');
-        selectBox.classList.toggle('active');
+        namingOptionsContainer.classList.toggle('open');
+        namingSelectBox.classList.toggle('active');
     });
 
-    optionsList.forEach(option => {
+    namingOptionsList.forEach(option => {
         option.addEventListener('click', (e) => {
             e.stopPropagation();
-            selectTrigger.textContent = option.textContent;
+            namingSelectTrigger.textContent = option.textContent;
             namingStyleHidden.value = option.getAttribute('data-value');
             
-            optionsList.forEach(opt => opt.classList.remove('selected'));
+            namingOptionsList.forEach(opt => opt.classList.remove('selected'));
             option.classList.add('selected');
             
-            optionsContainer.classList.remove('open');
-            selectBox.classList.remove('active');
+            namingOptionsContainer.classList.remove('open');
+            namingSelectBox.classList.remove('active');
+        });
+    });
+
+    fabEnabledSelectBox.addEventListener('click', (e) => {
+        e.stopPropagation();
+        fabEnabledOptionsContainer.classList.toggle('open');
+        fabEnabledSelectBox.classList.toggle('active');
+    });
+
+    fabEnabledOptionsList.forEach(option => {
+        option.addEventListener('click', (e) => {
+            e.stopPropagation();
+            fabEnabledSelectTrigger.textContent = option.textContent;
+            fabEnabledHidden.value = option.getAttribute('data-value');
+            
+            fabEnabledOptionsList.forEach(opt => opt.classList.remove('selected'));
+            option.classList.add('selected');
+            
+            fabEnabledOptionsContainer.classList.remove('open');
+            fabEnabledSelectBox.classList.remove('active');
+        });
+    });
+
+    fabPositionSelectBox.addEventListener('click', (e) => {
+        e.stopPropagation();
+        fabPositionOptionsContainer.classList.toggle('open');
+        fabPositionSelectBox.classList.toggle('active');
+    });
+
+    fabPositionOptionsList.forEach(option => {
+        option.addEventListener('click', (e) => {
+            e.stopPropagation();
+            fabPositionSelectTrigger.textContent = option.textContent;
+            fabPositionHidden.value = option.getAttribute('data-value');
+            
+            fabPositionOptionsList.forEach(opt => opt.classList.remove('selected'));
+            option.classList.add('selected');
+            
+            fabPositionOptionsContainer.classList.remove('open');
+            fabPositionSelectBox.classList.remove('active');
         });
     });
 
     document.addEventListener('click', () => {
-        optionsContainer.classList.remove('open');
-        selectBox.classList.remove('active');
+        namingOptionsContainer.classList.remove('open');
+        namingSelectBox.classList.remove('active');
+        fabEnabledOptionsContainer.classList.remove('open');
+        fabEnabledSelectBox.classList.remove('active');
+        fabPositionOptionsContainer.classList.remove('open');
+        fabPositionSelectBox.classList.remove('active');
     });
 
     function showStatus(message, color = '#7851A9') {
@@ -61,7 +119,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    chrome.storage.local.get(['saveFolder', 'namingStyle', 'sciHubDomain', 'libgenDomain', 'annasDomain', 'nexusBotUsername', 'geminiApiKey'], (result) => {
+    chrome.storage.local.get(['saveFolder', 'namingStyle', 'fabEnabled', 'fabPosition', 'sciHubDomain', 'libgenDomain', 'annasDomain', 'nexusBotUsername', 'geminiApiKey'], (result) => {
         saveLocationInput.value = result.saveFolder || 'Renamed Papers';
         if (result.sciHubDomain) sciHubInput.value = result.sciHubDomain;
         if (result.libgenDomain) libgenInput.value = result.libgenDomain;
@@ -69,11 +127,27 @@ document.addEventListener('DOMContentLoaded', () => {
         nexusBotInput.value = result.nexusBotUsername || 'sks7777777nexusbot';
         if (result.geminiApiKey) apiKeyInput.value = result.geminiApiKey;
         
+        const fabEnabledValue = result.fabEnabled !== false ? 'true' : 'false';
+        fabEnabledHidden.value = fabEnabledValue;
+        const activeFabEnabledOption = Array.from(fabEnabledOptionsList).find(opt => opt.getAttribute('data-value') === fabEnabledValue);
+        if (activeFabEnabledOption) {
+            fabEnabledSelectTrigger.textContent = activeFabEnabledOption.textContent;
+            activeFabEnabledOption.classList.add('selected');
+        }
+
+        const fabPositionValue = result.fabPosition || 'bottom-left';
+        fabPositionHidden.value = fabPositionValue;
+        const activeFabPositionOption = Array.from(fabPositionOptionsList).find(opt => opt.getAttribute('data-value') === fabPositionValue);
+        if (activeFabPositionOption) {
+            fabPositionSelectTrigger.textContent = activeFabPositionOption.textContent;
+            activeFabPositionOption.classList.add('selected');
+        }
+        
         if (result.namingStyle) {
             namingStyleHidden.value = result.namingStyle;
-            const activeOption = Array.from(optionsList).find(opt => opt.getAttribute('data-value') === result.namingStyle);
+            const activeOption = Array.from(namingOptionsList).find(opt => opt.getAttribute('data-value') === result.namingStyle);
             if (activeOption) {
-                selectTrigger.textContent = activeOption.textContent;
+                namingSelectTrigger.textContent = activeOption.textContent;
                 activeOption.classList.add('selected');
             }
         }
@@ -95,9 +169,14 @@ document.addEventListener('DOMContentLoaded', () => {
         let nexus = nexusBotInput.value.trim().replace('@', '');
         if (!nexus) nexus = 'sks7777777nexusbot';
         
+        const fabEnabledValue = fabEnabledHidden.value === 'true';
+        const fabPositionValue = fabPositionHidden.value;
+        
         chrome.storage.local.set({ 
             saveFolder: folder,
             namingStyle: namingStyleHidden.value,
+            fabEnabled: fabEnabledValue,
+            fabPosition: fabPositionValue,
             sciHubDomain: sciHub,
             libgenDomain: libgen,
             annasDomain: annas,

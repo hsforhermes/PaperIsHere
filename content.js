@@ -5,7 +5,96 @@ let publisherPdfUrl = null;
 let pageText = "";
 const isPublisherViewerPage = window.location.pathname.includes('/doi/epdf/') || window.location.pathname.includes('/doi/epub/');
 
+function hostMatches(domains) {
+    const hostname = window.location.hostname.toLowerCase();
+    return domains.some(d => hostname === d || hostname.endsWith('.' + d));
+}
+
 const IGNORED_HOSTS = ['gemini.google.com', 'chatgpt.com', 'chat.openai.com', 'claude.ai', 'perplexity.ai'];
+
+const ACADEMIC_PUBLISHER_DOMAINS = [
+    'journals.sagepub.com',
+    'sciencedirect.com',
+    'link.springer.com',
+    'nature.com',
+    'onlinelibrary.wiley.com',
+    'tandfonline.com',
+    'oxfordacademic.com',
+    'academic.oup.com',
+    'cambridge.org',
+    'jstor.org',
+    'dl.acm.org',
+    'ieeexplore.ieee.org',
+    'journals.aps.org',
+    'journals.ams.org',
+    'annualreviews.org',
+    'cell.com',
+    'pnas.org',
+    'bmj.com',
+    'nejm.org',
+    'thelancet.com',
+    'emerald.com',
+    'degruyter.com',
+    'frontiersin.org',
+    'mdpi.com',
+    'plos.org',
+    'royalsocietypublishing.org',
+    'ebsco.com',
+    'proquest.com',
+    'arxiv.org',
+    'biorxiv.org',
+    'medrxiv.org',
+    'ssrn.com',
+    'researchgate.net',
+    'academia.edu',
+    'scholar.google.com',
+    'pubmed.ncbi.nlm.nih.gov',
+    'nih.gov',
+    'acs.org',
+    'rsc.org',
+    'aaas.org',
+    'science.org',
+    'karger.com',
+    'thieme-connect.com'
+];
+
+function shouldShowFAB() {
+    if (hostMatches(IGNORED_HOSTS)) return false;
+
+    const hostname = window.location.hostname.toLowerCase();
+    const pathname = window.location.pathname.toLowerCase();
+    const href = window.location.href.toLowerCase();
+
+    const hasDoi = !!doi;
+    const hasIsbn = !!isbn;
+    const hasPdfUrl = !!publisherPdfUrl;
+    
+    const hasAcademicPath = pathname.includes('/doi/') || 
+                            pathname.includes('/article/') || 
+                            pathname.includes('/abs/') || 
+                            pathname.includes('/reader/') ||
+                            pathname.includes('/full/') ||
+                            pathname.includes('/epdf/') ||
+                            pathname.includes('/epub/') ||
+                            pathname.includes('/pdf/') ||
+                            href.includes('jstor.org/stable/');
+
+    const isOnPublisher = hostMatches(ACADEMIC_PUBLISHER_DOMAINS);
+    
+    if (hasDoi || hasIsbn || hasPdfUrl) {
+        return true;
+    }
+    
+    if (isOnPublisher && hasAcademicPath) {
+        return true;
+    }
+    
+    if (isPublisherViewerPage) {
+        return true;
+    }
+
+    return false;
+}
 
 if (window.location.href.includes('/doi/epub/')) {
     window.location.replace(window.location.href.replace('/doi/epub/', '/doi/epdf/'));
@@ -153,6 +242,7 @@ function sanitizePublisherUrl(rawUrl) {
     if (!safeUrl.startsWith('http')) safeUrl = new URL(safeUrl, window.location.origin).href;
     safeUrl = safeUrl.split('?')[0]; 
     if (safeUrl.includes('/doi/epub/')) safeUrl = safeUrl.replace('/doi/epub/', '/doi/epdf/');
+    if (safeUrl.includes('/doi/reader/')) safeUrl = safeUrl.replace('/doi/reader/', '/doi/pdf/');
     return safeUrl;
 }
 
@@ -257,7 +347,7 @@ function createDownloadButton(title, url, iconHtml, actionType, buttonColor = "#
     const btn = document.createElement("a");
     if (actionType === "bypass") {
         btn.href = "javascript:void(0);";
-        btn.onclick = (e) => { e.preventDefault(); initiateDirectDownload(url, btn); };
+        btn.addEventListener('click', (e) => { e.preventDefault(); initiateDirectDownload(url, btn); });
     } else if (actionType === "blank") {
         btn.href = url;
         btn.target = "_blank";
@@ -280,23 +370,154 @@ function createDownloadButton(title, url, iconHtml, actionType, buttonColor = "#
     return btn;
 }
 
+function detectCornerCollisionOffset(position) {
+    const isTop = position.includes('top');
+    const isLeft = position.includes('left');
+    const defaultMargin = 24;
+    const maxOffset = 120;
+    
+    // FAB bounding box
+    const fabRect = {
+        left: isLeft ? defaultMargin : window.innerWidth - defaultMargin - 44,
+        right: isLeft ? defaultMargin + 44 : window.innerWidth - defaultMargin,
+        top: isTop ? defaultMargin : window.innerHeight - defaultMargin - 44,
+        bottom: isTop ? defaultMargin + 44 : window.innerHeight - defaultMargin
+    };
+
+    // Open menu bounding box (approximate: 320px wide, 380px tall, 16px gap from FAB)
+    const menuRect = {
+        left: isLeft ? defaultMargin : window.innerWidth - defaultMargin - 320,
+        right: isLeft ? defaultMargin + 320 : window.innerWidth - defaultMargin,
+        top: isTop ? defaultMargin + 44 + 16 : window.innerHeight - defaultMargin - 44 - 16 - 380,
+        bottom: isTop ? defaultMargin + 44 + 16 + 380 : window.innerHeight - defaultMargin - 44 - 16
+    };
+
+    let maxCollisionShift = 0;
+
+    // Targeted selector for likely overlay/cookie/chat widgets
+    const candidates = document.querySelectorAll(
+        '[class*="cookie"], [id*="cookie"], ' +
+        '[class*="consent"], [id*="consent"], ' +
+        '[class*="chat"], [id*="chat"], ' +
+        '[class*="widget"], [id*="widget"], ' +
+        '[class*="banner"], [id*="banner"], ' +
+        '[class*="toast"], [id*="toast"], ' +
+        '[class*="notification"], [id*="notification"], ' +
+        '[class*="popup"], [id*="popup"], ' +
+        '[class*="modal"], [id*="modal"], ' +
+        '[class*="overlay"], [id*="overlay"], ' +
+        '[class*="footer"], [id*="footer"], ' +
+        '[class*="header"], [id*="header"], ' +
+        '[class*="sidebar"], [id*="sidebar"], ' +
+        'nav[style*="fixed"], nav[style*="sticky"], ' +
+        'footer[style*="fixed"], footer[style*="sticky"], ' +
+        'div[style*="fixed"], div[style*="sticky"]'
+    );
+
+    for (let i = 0; i < candidates.length; i++) {
+        const el = candidates[i];
+        if (el.id === 'paperishere-ui-wrapper' || el.closest('#paperishere-ui-wrapper')) continue;
+
+        const style = window.getComputedStyle(el);
+        if (style.position !== 'fixed' && style.position !== 'sticky') continue;
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
+
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) continue;
+        if (rect.top >= window.innerHeight || rect.bottom <= 0 || rect.left >= window.innerWidth || rect.right <= 0) continue;
+        if (rect.width * rect.height < 400) continue;
+
+        const overlapsFab = !(rect.right < fabRect.left || 
+                               rect.left > fabRect.right || 
+                               rect.bottom < fabRect.top || 
+                               rect.top > fabRect.bottom);
+        
+        const overlapsMenu = !(rect.right < menuRect.left || 
+                                rect.left > menuRect.right || 
+                                rect.bottom < menuRect.top || 
+                                rect.top > menuRect.bottom);
+
+        if (overlapsFab || overlapsMenu) {
+            let shift = 0;
+            if (isTop) {
+                const blockingBottom = Math.max(
+                    overlapsFab ? rect.bottom : 0,
+                    overlapsMenu ? rect.bottom : 0
+                );
+                shift = Math.max(shift, (blockingBottom + 12) - Math.min(fabRect.top, menuRect.top));
+            } else {
+                const blockingTop = Math.min(
+                    overlapsFab ? rect.top : window.innerHeight,
+                    overlapsMenu ? rect.top : window.innerHeight
+                );
+                shift = Math.max(shift, Math.max(fabRect.bottom, menuRect.bottom) - (blockingTop - 12));
+            }
+            if (shift > maxCollisionShift) {
+                maxCollisionShift = shift;
+            }
+        }
+    }
+
+    return Math.min(Math.max(0, Math.ceil(maxCollisionShift)), 120);
+}
+
 async function injectButtons() {
-    if (IGNORED_HOSTS.some(h => window.location.hostname.includes(h))) return;
+    if (hostMatches(IGNORED_HOSTS)) return;
 
     const existingContainer = document.getElementById("paperishere-ui-wrapper");
     if (existingContainer) existingContainer.remove();
 
-    const isLibgenDownloadPage = window.location.hostname.includes("libgen") && (window.location.pathname.includes("ads.php") || window.location.pathname.includes("get.php"));
+    const isLibgenDownloadPage = hostMatches(['libgen.rs', 'libgen.li', 'libgen.vg', 'libgen.is']) && (window.location.pathname.includes("ads.php") || window.location.pathname.includes("get.php"));
 
-    if (!doi && !isbn && !publisherPdfUrl && !articleTitle && !isLibgenDownloadPage && !isPublisherViewerPage) return;
+    if (!shouldShowFAB() && !isLibgenDownloadPage) return;
+
+    const settings = await new Promise(resolve => {
+        chrome.storage.local.get(['fabEnabled', 'fabPosition'], resolve);
+    });
+
+    const fabEnabled = settings.fabEnabled !== false;
+    const fabPosition = settings.fabPosition || 'bottom-left';
+
+    if (!fabEnabled) return;
+
+    const offset = detectCornerCollisionOffset(fabPosition);
+    const defaultMargin = 24;
 
     const wrapper = document.createElement("div");
-    wrapper.id = "paperishere-ui-wrapper"; 
-    wrapper.style.cssText = "position:fixed; bottom:24px; left:24px; z-index:9999999; display:flex; flex-direction:column; align-items:flex-start; gap:16px; pointer-events:none;";
+    wrapper.id = "paperishere-ui-wrapper";
+    
+    let positionCSS = '';
+    let menuOrigin = 'bottom left';
+    let menuTransform = 'translateY(20px) scale(0.95)';
+    
+    switch(fabPosition) {
+        case 'bottom-right':
+            positionCSS = `bottom:${defaultMargin + offset}px; right:${defaultMargin}px;`;
+            menuOrigin = "bottom right";
+            break;
+        case 'top-left':
+            positionCSS = `top:${defaultMargin + offset}px; left:${defaultMargin}px;`;
+            menuOrigin = "top left";
+            menuTransform = "translateY(-20px) scale(0.95)";
+            break;
+        case 'top-right':
+            positionCSS = `top:${defaultMargin + offset}px; right:${defaultMargin}px;`;
+            menuOrigin = "top right";
+            menuTransform = "translateY(-20px) scale(0.95)";
+            break;
+        case 'bottom-left':
+        default:
+            positionCSS = `bottom:${defaultMargin + offset}px; left:${defaultMargin}px;`;
+            menuOrigin = "bottom left";
+            break;
+    }
+    
+    // Zero-size wrapper with pointer-events:none to avoid any hitbox
+    wrapper.style.cssText = `position:fixed; ${positionCSS} z-index:9999999; width:0; height:0; overflow:visible; display:flex; flex-direction:column; align-items:flex-start; gap:16px; pointer-events:none; visibility:hidden;`;
 
     const menu = document.createElement("div");
     menu.id = "paperishere-ui-menu";
-    menu.style.cssText = "display:flex; flex-direction:column; gap:12px; opacity:0; pointer-events:none; transform:translateY(20px) scale(0.95); transform-origin:bottom left; transition:all 0.2s ease;";
+    menu.style.cssText = `display:flex; flex-direction:column; gap:12px; opacity:0; pointer-events:none; transform:${menuTransform}; transform-origin:${menuOrigin}; transition:all 0.2s ease;`;
 
     if (publisherPdfUrl && !isPublisherViewerPage) {
         const btn = createDownloadButton("Save PDF (Direct)", publisherPdfUrl, directIcon, "bypass", "#000000", "#10B981");
@@ -370,6 +591,10 @@ async function injectButtons() {
     fab.style.cssText = "width:44px; height:44px; background-color:#000000; color:#ffffff; border:2px solid #000000; border-radius:0px; display:flex; justify-content:center; align-items:center; cursor:pointer; box-shadow:4px 4px 0px #7851A9; transition:all 0.1s ease; pointer-events:auto;";
     fab.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
     
+    const closedTransform = menuTransform;
+    const openTransform = menuTransform.replace('translateY(-20px) scale(0.95)', 'translateY(0) scale(1)')
+                                     .replace('translateY(20px) scale(0.95)', 'translateY(0) scale(1)');
+
     let isMenuOpen = false;
     fab.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -377,7 +602,7 @@ async function injectButtons() {
         if (isMenuOpen) {
             menu.style.opacity = "1";
             menu.style.pointerEvents = "auto";
-            menu.style.transform = "translateY(0) scale(1)";
+            menu.style.transform = openTransform;
             fab.style.backgroundColor = "#ffffff";
             fab.style.color = "#000000";
             fab.style.boxShadow = "2px 2px 0px #7851A9";
@@ -386,7 +611,7 @@ async function injectButtons() {
         } else {
             menu.style.opacity = "0";
             menu.style.pointerEvents = "none";
-            menu.style.transform = "translateY(20px) scale(0.95)";
+            menu.style.transform = closedTransform;
             fab.style.backgroundColor = "#000000";
             fab.style.color = "#ffffff";
             fab.style.boxShadow = "4px 4px 0px #7851A9";
@@ -395,13 +620,32 @@ async function injectButtons() {
         }
     });
 
-    wrapper.appendChild(menu);
-    wrapper.appendChild(fab);
+    // For top positions, FAB should be on top (menu opens downward)
+    // For bottom positions, FAB should be on bottom (menu opens upward)
+    if (fabPosition.includes('top')) {
+        wrapper.appendChild(fab);
+        wrapper.appendChild(menu);
+    } else {
+        wrapper.appendChild(menu);
+        wrapper.appendChild(fab);
+    }
+    
     document.body.appendChild(wrapper);
+    
+    // Stronger initial-load fix: wait for both layout and a frame
+    const reveal = () => {
+        wrapper.style.visibility = "visible";
+    };
+    
+    if (document.readyState === 'complete') {
+        requestAnimationFrame(reveal);
+    } else {
+        window.addEventListener('load', () => requestAnimationFrame(reveal), { once: true });
+    }
 }
 
 function initializeExtension() {
-    if (IGNORED_HOSTS.some(h => window.location.hostname.includes(h))) return;
+    if (hostMatches(IGNORED_HOSTS)) return;
 
     doi = extractDoiStrict();
     isbn = extractIsbnStrict();
