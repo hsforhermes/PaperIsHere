@@ -85,34 +85,6 @@
   <label>Save Folder (Downloads)</label>
   <input type="text" id="saveLocation" placeholder="Renamed Papers">
 
-  <label>Floating Button</label>
-  <div class="custom-select-wrapper" id="fabEnabledDropdown">
-    <div class="custom-select">
-      <span class="custom-select-trigger">Enabled</span>
-      <span class="custom-select-arrow">▼</span>
-    </div>
-    <div class="custom-options">
-      <div class="custom-option" data-value="true">Enabled</div>
-      <div class="custom-option" data-value="false">Disabled</div>
-    </div>
-  </div>
-  <input type="hidden" id="fabEnabled" value="true">
-
-  <label>Button Position</label>
-  <div class="custom-select-wrapper" id="fabPositionDropdown">
-    <div class="custom-select">
-      <span class="custom-select-trigger">Bottom Left</span>
-      <span class="custom-select-arrow">▼</span>
-    </div>
-    <div class="custom-options">
-      <div class="custom-option" data-value="bottom-left">Bottom Left</div>
-      <div class="custom-option" data-value="bottom-right">Bottom Right</div>
-      <div class="custom-option" data-value="top-left">Top Left</div>
-      <div class="custom-option" data-value="top-right">Top Right</div>
-    </div>
-  </div>
-  <input type="hidden" id="fabPosition" value="bottom-left">
-
   <label>Naming Format</label>
   <div class="custom-select-wrapper" id="namingDropdown">
     <div class="custom-select">
@@ -135,6 +107,19 @@
   </div>
 
   <div id="advancedOptions">
+      <label>Floating Button</label>
+      <div class="custom-select-wrapper" id="fabEnabledDropdown">
+        <div class="custom-select">
+          <span class="custom-select-trigger">Enabled</span>
+          <span class="custom-select-arrow">▼</span>
+        </div>
+        <div class="custom-options">
+          <div class="custom-option" data-value="true">Enabled</div>
+          <div class="custom-option" data-value="false">Disabled</div>
+        </div>
+      </div>
+      <input type="hidden" id="fabEnabled" value="true">
+
       <label>Sci-Hub Domain</label>
       <input type="text" id="sciHubDomain" placeholder="https://sci-hub.st">
       <a href="https://sci-hub.pub" target="_blank" class="hint-link">Find active Sci-Hub mirrors ↗</a>

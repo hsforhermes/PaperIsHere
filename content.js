@@ -1,16 +1,16 @@
 let doi = null;
 let isbn = null;
-let articleTitle = null; 
+let articleTitle = null;
 let publisherPdfUrl = null;
 let pageText = "";
 const isPublisherViewerPage = window.location.pathname.includes('/doi/epdf/') || window.location.pathname.includes('/doi/epub/');
+
+const IGNORED_HOSTS = ['gemini.google.com', 'chatgpt.com', 'chat.openai.com', 'claude.ai', 'perplexity.ai'];
 
 function hostMatches(domains) {
     const hostname = window.location.hostname.toLowerCase();
     return domains.some(d => hostname === d || hostname.endsWith('.' + d));
 }
-
-const IGNORED_HOSTS = ['gemini.google.com', 'chatgpt.com', 'chat.openai.com', 'claude.ai', 'perplexity.ai'];
 
 const ACADEMIC_PUBLISHER_DOMAINS = [
     'journals.sagepub.com',
@@ -61,7 +61,6 @@ const ACADEMIC_PUBLISHER_DOMAINS = [
 function shouldShowFAB() {
     if (hostMatches(IGNORED_HOSTS)) return false;
 
-    const hostname = window.location.hostname.toLowerCase();
     const pathname = window.location.pathname.toLowerCase();
     const href = window.location.href.toLowerCase();
 
@@ -267,11 +266,11 @@ function extractNativePdfUrlStrict() {
         if (href.includes("sci-hub") || href.includes("libgen") || href.includes("annas-archive") || href.includes("t.me")) continue;
         if (href.includes('onlinelibrary.wiley.com/doi/pdf/') && isRestrictedAccess()) continue;
 
-        if (href.includes('/doi/pdf/') || href.includes('/doi/epdf/') || href.includes('/doi/epub/')) return sanitizePublisherUrl(a.href);
+        if (href.includes('/doi/pdf/') || href.includes('/doi/epdf/') || href.includes('/doi/epub/') || href.includes('/doi/reader/')) return sanitizePublisherUrl(a.href);
         if (text === 'download pdf' || text === 'article pdf' || text.includes('pdf/epub')) return sanitizePublisherUrl(a.href);
     }
     
-    if (isPublisherViewerPage && doi) return sanitizePublisherUrl(`https://journals.sagepub.com/doi/epdf/${doi}`);
+    if (isPublisherViewerPage && doi) return sanitizePublisherUrl(`https://journals.sagepub.com/doi/pdf/${doi}`);
     return null;
 }
 
@@ -345,9 +344,10 @@ function initiateDirectDownload(originalUrl, btnElement) {
 
 function createDownloadButton(title, url, iconHtml, actionType, buttonColor = "#000000", hoverColor = "#7851A9") {
     const btn = document.createElement("a");
+    btn.className = "paperishere-btn";
     if (actionType === "bypass") {
         btn.href = "javascript:void(0);";
-        btn.addEventListener('click', (e) => { e.preventDefault(); initiateDirectDownload(url, btn); });
+        btn.onclick = (e) => { e.preventDefault(); initiateDirectDownload(url, btn); };
     } else if (actionType === "blank") {
         btn.href = url;
         btn.target = "_blank";
@@ -357,317 +357,581 @@ function createDownloadButton(title, url, iconHtml, actionType, buttonColor = "#
         btn.target = "_self";
     }
 
-    btn.style.cssText = `
-        display: flex; align-items: center; gap: 12px; background-color: #ffffff; color: #000000;
-        padding: 12px 18px; border: 2px solid #000000; border-radius: 0px; text-decoration: none;
-        font-family: 'Helvetica Neue', Arial, sans-serif; font-weight: 800; font-size: 14px;
-        text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 4px 4px 0px ${buttonColor};
-        transition: all 0.2s ease; pointer-events: auto; cursor: pointer; white-space: nowrap;
-    `;
+    if (buttonColor !== "#000000") {
+        btn.style.boxShadow = `4px 4px 0px ${buttonColor}`;
+    }
     btn.innerHTML = `<span style="color:${hoverColor}; display:flex; align-items:center;">${iconHtml}</span> ${title}`;
-    btn.onmouseover = () => { btn.style.backgroundColor = "#000000"; btn.style.color = "#ffffff"; btn.style.boxShadow = `4px 4px 0px ${hoverColor}`; };
-    btn.onmouseout = () => { btn.style.backgroundColor = "#ffffff"; btn.style.color = "#000000"; btn.style.boxShadow = `4px 4px 0px ${buttonColor}`; };
     return btn;
 }
 
-function detectCornerCollisionOffset(position) {
-    const isTop = position.includes('top');
-    const isLeft = position.includes('left');
-    const defaultMargin = 24;
-    const maxOffset = 120;
-    
-    // FAB bounding box
-    const fabRect = {
-        left: isLeft ? defaultMargin : window.innerWidth - defaultMargin - 44,
-        right: isLeft ? defaultMargin + 44 : window.innerWidth - defaultMargin,
-        top: isTop ? defaultMargin : window.innerHeight - defaultMargin - 44,
-        bottom: isTop ? defaultMargin + 44 : window.innerHeight - defaultMargin
-    };
+const FABManager = {
+    state: {
+        enabled: true,
+        isMenuOpen: false,
+        wrapper: null,
+        shadow: null,
+        container: null,
+        fab: null,
+        menu: null,
+        resizeTimer: null,
+        currentBottom: 78,
+        listeners: null,
+        autoCloseTimer: null
+    },
 
-    // Open menu bounding box (approximate: 320px wide, 380px tall, 16px gap from FAB)
-    const menuRect = {
-        left: isLeft ? defaultMargin : window.innerWidth - defaultMargin - 320,
-        right: isLeft ? defaultMargin + 320 : window.innerWidth - defaultMargin,
-        top: isTop ? defaultMargin + 44 + 16 : window.innerHeight - defaultMargin - 44 - 16 - 380,
-        bottom: isTop ? defaultMargin + 44 + 16 + 380 : window.innerHeight - defaultMargin - 44 - 16
-    };
+    AUTO_CLOSE_DELAY_MS: 15000,
 
-    let maxCollisionShift = 0;
+    clearAutoCloseTimer() {
+        if (this.state.autoCloseTimer) {
+            clearTimeout(this.state.autoCloseTimer);
+            this.state.autoCloseTimer = null;
+        }
+    },
 
-    // Targeted selector for likely overlay/cookie/chat widgets
-    const candidates = document.querySelectorAll(
-        '[class*="cookie"], [id*="cookie"], ' +
-        '[class*="consent"], [id*="consent"], ' +
-        '[class*="chat"], [id*="chat"], ' +
-        '[class*="widget"], [id*="widget"], ' +
-        '[class*="banner"], [id*="banner"], ' +
-        '[class*="toast"], [id*="toast"], ' +
-        '[class*="notification"], [id*="notification"], ' +
-        '[class*="popup"], [id*="popup"], ' +
-        '[class*="modal"], [id*="modal"], ' +
-        '[class*="overlay"], [id*="overlay"], ' +
-        '[class*="footer"], [id*="footer"], ' +
-        '[class*="header"], [id*="header"], ' +
-        '[class*="sidebar"], [id*="sidebar"], ' +
-        'nav[style*="fixed"], nav[style*="sticky"], ' +
-        'footer[style*="fixed"], footer[style*="sticky"], ' +
-        'div[style*="fixed"], div[style*="sticky"]'
-    );
+    startAutoCloseTimer() {
+        this.clearAutoCloseTimer();
+        this.state.autoCloseTimer = setTimeout(() => {
+            this.state.autoCloseTimer = null;
+            this.closeMenu();
+        }, this.AUTO_CLOSE_DELAY_MS);
+    },
 
-    for (let i = 0; i < candidates.length; i++) {
-        const el = candidates[i];
-        if (el.id === 'paperishere-ui-wrapper' || el.closest('#paperishere-ui-wrapper')) continue;
-
-        const style = window.getComputedStyle(el);
-        if (style.position !== 'fixed' && style.position !== 'sticky') continue;
-        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
-
-        const rect = el.getBoundingClientRect();
-        if (rect.width === 0 || rect.height === 0) continue;
-        if (rect.top >= window.innerHeight || rect.bottom <= 0 || rect.left >= window.innerWidth || rect.right <= 0) continue;
-        if (rect.width * rect.height < 400) continue;
-
-        const overlapsFab = !(rect.right < fabRect.left || 
-                               rect.left > fabRect.right || 
-                               rect.bottom < fabRect.top || 
-                               rect.top > fabRect.bottom);
-        
-        const overlapsMenu = !(rect.right < menuRect.left || 
-                                rect.left > menuRect.right || 
-                                rect.bottom < menuRect.top || 
-                                rect.top > menuRect.bottom);
-
-        if (overlapsFab || overlapsMenu) {
-            let shift = 0;
-            if (isTop) {
-                const blockingBottom = Math.max(
-                    overlapsFab ? rect.bottom : 0,
-                    overlapsMenu ? rect.bottom : 0
-                );
-                shift = Math.max(shift, (blockingBottom + 12) - Math.min(fabRect.top, menuRect.top));
-            } else {
-                const blockingTop = Math.min(
-                    overlapsFab ? rect.top : window.innerHeight,
-                    overlapsMenu ? rect.top : window.innerHeight
-                );
-                shift = Math.max(shift, Math.max(fabRect.bottom, menuRect.bottom) - (blockingTop - 12));
+    getShadowStyles() {
+        return `
+            *, *::before, *::after {
+                box-sizing: border-box !important;
+                margin: 0 !important;
+                padding: 0 !important;
             }
-            if (shift > maxCollisionShift) {
-                maxCollisionShift = shift;
+            .paperishere-container {
+                position: absolute !important;
+                bottom: 0 !important;
+                left: 0 !important;
+                display: flex !important;
+                flex-direction: column !important;
+                align-items: flex-start !important;
+                gap: 12px !important;
+                pointer-events: none !important;
+                width: max-content !important;
+                z-index: 2147483647 !important;
+            }
+            .paperishere-fab {
+                all: unset !important;
+                box-sizing: border-box !important;
+                width: 52px !important;
+                height: 48px !important;
+                background-color: #000000 !important;
+                color: #ffffff !important;
+                border: 2px solid #000000 !important;
+                border-left: none !important;
+                border-radius: 0 4px 4px 0 !important;
+                display: flex !important;
+                justify-content: center !important;
+                align-items: center !important;
+                cursor: pointer !important;
+                box-shadow: none !important;
+                transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease !important;
+                pointer-events: auto !important;
+                user-select: none !important;
+                outline: none !important;
+                opacity: 1 !important;
+                visibility: visible !important;
+                flex-shrink: 0 !important;
+            }
+            .paperishere-fab:hover {
+                background-color: #7851A9 !important;
+                border-color: #7851A9 !important;
+                color: #ffffff !important;
+                box-shadow: none !important;
+            }
+            .paperishere-fab.open {
+                background-color: #ffffff !important;
+                color: #000000 !important;
+                border-color: #000000 !important;
+                box-shadow: none !important;
+                transform: none !important;
+            }
+            .paperishere-fab svg {
+                display: block !important;
+                width: 24px !important;
+                height: 24px !important;
+                stroke: currentColor !important;
+                fill: none !important;
+                stroke-width: 2.5 !important;
+            }
+            .paperishere-menu {
+                display: flex !important;
+                flex-direction: column !important;
+                gap: 8px !important;
+                opacity: 0 !important;
+                visibility: hidden !important;
+                pointer-events: none !important;
+                transform: translateY(12px) scale(0.96) !important;
+                transform-origin: bottom left !important;
+                transition: opacity 0.18s cubic-bezier(0.16, 1, 0.3, 1), transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.18s !important;
+                align-items: flex-start !important;
+                margin-left: 10px !important;
+            }
+            .paperishere-menu.open {
+                opacity: 1 !important;
+                visibility: visible !important;
+                pointer-events: auto !important;
+                transform: translateY(0) scale(1) !important;
+            }
+            .paperishere-btn {
+                display: flex !important;
+                align-items: center !important;
+                gap: 10px !important;
+                background-color: #ffffff !important;
+                color: #000000 !important;
+                padding: 10px 16px !important;
+                border: 2px solid #000000 !important;
+                border-radius: 0px !important;
+                text-decoration: none !important;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
+                font-weight: 800 !important;
+                font-size: 13px !important;
+                text-transform: uppercase !important;
+                letter-spacing: 0.5px !important;
+                box-shadow: 4px 4px 0px #000000 !important;
+                transition: all 0.15s ease !important;
+                pointer-events: auto !important;
+                cursor: pointer !important;
+                white-space: nowrap !important;
+                outline: none !important;
+                line-height: 1.2 !important;
+                user-select: none !important;
+            }
+            .paperishere-btn:hover {
+                background-color: #000000 !important;
+                color: #ffffff !important;
+                box-shadow: 4px 4px 0px #7851A9 !important;
+            }
+            .paperishere-btn svg {
+                flex-shrink: 0 !important;
+                display: block !important;
+            }
+            .paperishere-info-badge {
+                display: flex !important;
+                align-items: center !important;
+                gap: 10px !important;
+                background-color: #f9f9f9 !important;
+                color: #888888 !important;
+                padding: 10px 16px !important;
+                border: 2px dashed #cccccc !important;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
+                font-weight: 800 !important;
+                font-size: 11px !important;
+                text-transform: uppercase !important;
+                pointer-events: auto !important;
+                white-space: nowrap !important;
+            }
+        `;
+    },
+
+detectCollisions() {
+        if (!document.body) return 78;
+
+        let maxObstructionHeight = 0;
+        const candidates = document.querySelectorAll('button, a, div, footer, aside, section, nav');
+        const limit = Math.min(candidates.length, 600);
+
+        for (let i = 0; i < limit; i++) {
+            const el = candidates[i];
+            if (!el || el.id === 'paperishere-ui-wrapper' || (el.closest && el.closest('#paperishere-ui-wrapper'))) continue;
+
+            const style = window.getComputedStyle(el);
+            if (style.position !== 'fixed' && style.position !== 'sticky') continue;
+            if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) < 0.1) continue;
+
+            const rect = el.getBoundingClientRect();
+            if (rect.width < 20 || rect.height < 15 || rect.height > 180) continue;
+            if (rect.width > window.innerWidth * 0.8 && rect.height > 100) continue;
+
+            const distanceFromBottom = window.innerHeight - rect.bottom;
+            if (distanceFromBottom > 80 || rect.top < window.innerHeight - 250) continue;
+
+            if (rect.left < 80 && rect.right > 0) {
+                const heightFromBottom = window.innerHeight - rect.top;
+                if (heightFromBottom > maxObstructionHeight && heightFromBottom < 220) {
+                    maxObstructionHeight = heightFromBottom;
+                }
             }
         }
-    }
 
-    return Math.min(Math.max(0, Math.ceil(maxCollisionShift)), 120);
-}
+        if (maxObstructionHeight > 0) {
+            return Math.max(78, Math.min(maxObstructionHeight + 10, 220));
+        }
+        return 78;
+    },
 
-async function injectButtons() {
-    if (hostMatches(IGNORED_HOSTS)) return;
+    updatePosition() {
+        if (!this.state.wrapper) return;
 
-    const existingContainer = document.getElementById("paperishere-ui-wrapper");
-    if (existingContainer) existingContainer.remove();
+        const targetBottom = this.detectCollisions();
 
-    const isLibgenDownloadPage = hostMatches(['libgen.rs', 'libgen.li', 'libgen.vg', 'libgen.is']) && (window.location.pathname.includes("ads.php") || window.location.pathname.includes("get.php"));
+        if (Math.abs(this.state.currentBottom - targetBottom) > 2) {
+            this.state.currentBottom = targetBottom;
+            this.state.wrapper.style.bottom = `${targetBottom}px`;
+        }
+    },
 
-    if (!shouldShowFAB() && !isLibgenDownloadPage) return;
+    closeMenu() {
+        this.clearAutoCloseTimer();
+        this.state.isMenuOpen = false;
+        if (this.state.menu) {
+            this.state.menu.classList.remove('open');
+        }
+        if (this.state.fab) {
+            this.state.fab.classList.remove('open');
+            this.state.fab.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="square"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
+            this.state.fab.setAttribute('aria-expanded', 'false');
+        }
+    },
 
-    const settings = await new Promise(resolve => {
-        chrome.storage.local.get(['fabEnabled', 'fabPosition'], resolve);
-    });
+    openMenu() {
+        this.state.isMenuOpen = true;
+        this.state.menu.classList.add('open');
+        this.state.fab.classList.add('open');
+        this.state.fab.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="square"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
+        this.state.fab.setAttribute('aria-expanded', 'true');
+        this.startAutoCloseTimer();
+    },
 
-    const fabEnabled = settings.fabEnabled !== false;
-    const fabPosition = settings.fabPosition || 'bottom-left';
+    toggleMenu() {
+        if (this.state.isMenuOpen) {
+            this.closeMenu();
+        } else {
+            this.openMenu();
+        }
+    },
 
-    if (!fabEnabled) return;
+    create() {
+        this.destroy();
 
-    const offset = detectCornerCollisionOffset(fabPosition);
-    const defaultMargin = 24;
+        const wrapper = document.createElement('div');
+        wrapper.id = 'paperishere-ui-wrapper';
+        wrapper.style.cssText = 'position:fixed !important; bottom:78px !important; left:0px !important; z-index:2147483647 !important; width:0px !important; height:0px !important; overflow:visible !important; pointer-events:none !important; margin:0 !important; padding:0 !important; border:none !important;';
 
-    const wrapper = document.createElement("div");
-    wrapper.id = "paperishere-ui-wrapper";
-    
-    let positionCSS = '';
-    let menuOrigin = 'bottom left';
-    let menuTransform = 'translateY(20px) scale(0.95)';
-    
-    switch(fabPosition) {
-        case 'bottom-right':
-            positionCSS = `bottom:${defaultMargin + offset}px; right:${defaultMargin}px;`;
-            menuOrigin = "bottom right";
-            break;
-        case 'top-left':
-            positionCSS = `top:${defaultMargin + offset}px; left:${defaultMargin}px;`;
-            menuOrigin = "top left";
-            menuTransform = "translateY(-20px) scale(0.95)";
-            break;
-        case 'top-right':
-            positionCSS = `top:${defaultMargin + offset}px; right:${defaultMargin}px;`;
-            menuOrigin = "top right";
-            menuTransform = "translateY(-20px) scale(0.95)";
-            break;
-        case 'bottom-left':
-        default:
-            positionCSS = `bottom:${defaultMargin + offset}px; left:${defaultMargin}px;`;
-            menuOrigin = "bottom left";
-            break;
-    }
-    
-    // Zero-size wrapper with pointer-events:none to avoid any hitbox
-    wrapper.style.cssText = `position:fixed; ${positionCSS} z-index:9999999; width:0; height:0; overflow:visible; display:flex; flex-direction:column; align-items:flex-start; gap:16px; pointer-events:none; visibility:hidden;`;
+        const shadow = wrapper.attachShadow({ mode: 'open' });
 
-    const menu = document.createElement("div");
-    menu.id = "paperishere-ui-menu";
-    menu.style.cssText = `display:flex; flex-direction:column; gap:12px; opacity:0; pointer-events:none; transform:${menuTransform}; transform-origin:${menuOrigin}; transition:all 0.2s ease;`;
+        const styleEl = document.createElement('style');
+        styleEl.textContent = this.getShadowStyles();
+        shadow.appendChild(styleEl);
 
-    if (publisherPdfUrl && !isPublisherViewerPage) {
-        const btn = createDownloadButton("Save PDF (Direct)", publisherPdfUrl, directIcon, "bypass", "#000000", "#10B981");
-        btn.style.order = "1";
-        menu.appendChild(btn);
-    } else if (publisherPdfUrl && isPublisherViewerPage) {
-        const infoBtn = document.createElement("div");
-        infoBtn.style.cssText = `display:flex; align-items:center; gap:12px; background-color:#f9f9f9; color:#888; padding:12px 18px; border:2px dashed #ccc; font-family:'Helvetica Neue', Arial, sans-serif; font-weight:800; font-size:11px; text-transform:uppercase; order:1; pointer-events:auto;`;
-        infoBtn.innerHTML = `<span style="color:#888; display:flex; align-items:center;">${directIcon}</span> USE SITE'S NATIVE PDF BUTTON ↗`;
-        menu.appendChild(infoBtn);
-    }
+        const container = document.createElement('div');
+        container.className = 'paperishere-container';
 
-    if (doi && !isPublisherViewerPage) {
-        chrome.runtime.sendMessage({ action: "checkUnpaywall", doi: doi }, (response) => {
-            if (response && response.url) {
-                const btn = createDownloadButton("Save PDF (Unpaywall)", response.url, directIcon, "bypass", "#000000", "#10B981");
-                btn.style.order = "2";
-                menu.appendChild(btn);
+        const menu = document.createElement('div');
+        menu.id = 'paperishere-ui-menu';
+        menu.className = 'paperishere-menu';
+
+        const fab = document.createElement('button');
+        fab.id = 'paperishere-fab';
+        fab.className = 'paperishere-fab';
+        fab.setAttribute('aria-label', 'Open PaperIsHere menu');
+        fab.setAttribute('aria-expanded', 'false');
+        fab.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="square"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
+
+        fab.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.toggleMenu();
+        });
+
+        fab.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && this.state.isMenuOpen) {
+                e.preventDefault();
+                this.closeMenu();
             }
         });
+
+        const resetInactivity = () => {
+            if (this.state.isMenuOpen) this.startAutoCloseTimer();
+        };
+        menu.addEventListener('mouseenter', resetInactivity);
+        menu.addEventListener('click', resetInactivity);
+        menu.addEventListener('focusin', resetInactivity);
+        fab.addEventListener('mouseenter', resetInactivity);
+
+        container.appendChild(menu);
+        container.appendChild(fab);
+        shadow.appendChild(container);
+        document.body.appendChild(wrapper);
+
+        this.state.wrapper = wrapper;
+        this.state.shadow = shadow;
+        this.state.container = container;
+        this.state.fab = fab;
+        this.state.menu = menu;
+        this.state.currentBottom = 28;
+
+        this.populateMenu();
+        this.updatePosition();
+        this.attachEventListeners();
+    },
+
+    populateMenu() {
+        if (!this.state.menu) return;
+        this.state.menu.innerHTML = '';
+
+        const isLibgenDownloadPage = window.location.hostname.includes("libgen") && (window.location.pathname.includes("ads.php") || window.location.pathname.includes("get.php"));
+
+        if (publisherPdfUrl && !isPublisherViewerPage) {
+            const btn = createDownloadButton("Save PDF (Direct)", publisherPdfUrl, directIcon, "bypass", "#000000", "#10B981");
+            btn.style.order = "1";
+            this.state.menu.appendChild(btn);
+        } else if (publisherPdfUrl && isPublisherViewerPage) {
+            const infoBtn = document.createElement("div");
+            infoBtn.className = "paperishere-info-badge";
+            infoBtn.style.order = "1";
+            infoBtn.innerHTML = `<span style="color:#888; display:flex; align-items:center;">${directIcon}</span> USE SITE'S NATIVE PDF BUTTON ↗`;
+            this.state.menu.appendChild(infoBtn);
+        }
+
+        if (doi && !isPublisherViewerPage) {
+            chrome.runtime.sendMessage({ action: "checkUnpaywall", doi: doi }, (response) => {
+                if (response && response.url) {
+                    const btn = createDownloadButton("Save PDF (Unpaywall)", response.url, directIcon, "bypass", "#000000", "#10B981");
+                    btn.style.order = "2";
+                    this.state.menu.appendChild(btn);
+                }
+            });
+        }
+
+        const scholarQuery = doi || isbn || articleTitle;
+        if (scholarQuery) {
+            const btn = createDownloadButton("Search in Scholar", `https://scholar.google.com/scholar?q=${encodeURIComponent(scholarQuery)}`, directIcon, "blank");
+            btn.style.order = "3";
+            this.state.menu.appendChild(btn);
+        }
+
+        chrome.storage.local.get(['sciHubDomain', 'libgenDomain', 'annasDomain', 'nexusBotUsername'], (domains) => {
+            if (doi) {
+                const btn = checkIsSciHub() ? createDownloadButton("Save PDF", extractSciHubPdfUrl(), sciHubIcon, "bypass") : createDownloadButton("Get PDF (Sci-Hub)", `${domains.sciHubDomain || "https://sci-hub.st"}/${doi}`, sciHubIcon, "blank");
+                btn.style.order = "4";
+                this.state.menu.appendChild(btn);
+            }
+
+            if (doi || isbn || articleTitle) {
+                const nexusTarget = doi || isbn || articleTitle;
+                const btn = createDownloadButton("Search in Nexus (Telegram)", `https://t.me/${domains.nexusBotUsername || "sks7777777nexusbot"}?text=${encodeURIComponent(nexusTarget)}`, nexusIcon, "blank", "#000000", "#24A1DE");
+                btn.style.order = "5";
+                this.state.menu.appendChild(btn);
+            }
+
+            const bookSearchQuery = isbn || doi || articleTitle;
+            if (bookSearchQuery && !isLibgenDownloadPage) {
+                const libgenUrl = domains.libgenDomain || "https://libgen.li";
+                const dynamicSearchUrl = buildLibgenSearchUrl(libgenUrl, bookSearchQuery);
+                const btn = createDownloadButton("Search Libgen (Books)", dynamicSearchUrl, bookIcon, "blank");
+                btn.style.order = "6";
+                this.state.menu.appendChild(btn);
+            }
+
+            if (bookSearchQuery && !isLibgenDownloadPage) {
+                let annasBase = domains.annasDomain || "https://annas-archive.org";
+                try { annasBase = new URL(annasBase).origin; } catch(e) {}
+                const cleanQuery = encodeURIComponent(bookSearchQuery).replace(/%2F/g, '/');
+                const annasUrl = `${annasBase}/s/${cleanQuery}?`;
+                const btn = createDownloadButton("Search Anna's Archive", annasUrl, annasIcon, "blank", "#000000", "#FF6B6B");
+                btn.style.order = "7";
+                this.state.menu.appendChild(btn);
+            }
+
+            if (isLibgenDownloadPage && extractLibgenDownloadUrl()) {
+                const btn = createDownloadButton("Save PDF (Libgen)", extractLibgenDownloadUrl(), bookIcon, "native");
+                btn.style.order = "8";
+                this.state.menu.appendChild(btn);
+            }
+        });
+    },
+
+    attachEventListeners() {
+        const outsideClickHandler = (e) => {
+            if (!this.state.isMenuOpen) return;
+            const path = e.composedPath ? e.composedPath() : [];
+            const hitInteractive = path.some(node => node && node.classList &&
+                (node.classList.contains('paperishere-fab') ||
+                 node.classList.contains('paperishere-btn') ||
+                 node.classList.contains('paperishere-info-badge')));
+            if (!hitInteractive) this.closeMenu();
+        };
+
+        const escapeHandler = (e) => {
+            if (e.key === 'Escape' && this.state.isMenuOpen) {
+                this.closeMenu();
+            }
+        };
+
+        const resizeHandler = () => {
+            if (this.state.resizeTimer) return;
+            this.state.resizeTimer = requestAnimationFrame(() => {
+                this.updatePosition();
+                this.state.resizeTimer = null;
+            });
+        };
+
+        const visibilityHandler = () => {
+            if (document.hidden) {
+                this.closeMenu();
+            }
+        };
+
+        document.addEventListener('click', outsideClickHandler);
+        document.addEventListener('keydown', escapeHandler);
+        document.addEventListener('visibilitychange', visibilityHandler);
+        window.addEventListener('resize', resizeHandler);
+        window.addEventListener('scroll', resizeHandler, { passive: true });
+
+        this.state.listeners = {
+            outsideClick: outsideClickHandler,
+            escape: escapeHandler,
+            resize: resizeHandler,
+            visibility: visibilityHandler
+        };
+    },
+
+    detachEventListeners() {
+        if (this.state.listeners) {
+            document.removeEventListener('click', this.state.listeners.outsideClick);
+            document.removeEventListener('keydown', this.state.listeners.escape);
+            document.removeEventListener('visibilitychange', this.state.listeners.visibility);
+            window.removeEventListener('resize', this.state.listeners.resize);
+            window.removeEventListener('scroll', this.state.listeners.resize);
+            this.state.listeners = null;
+        }
+    },
+
+    update(newSettings) {
+        const enabledChanged = newSettings.fabEnabled !== undefined && newSettings.fabEnabled !== this.state.enabled;
+
+        if (newSettings.fabEnabled !== undefined) {
+            this.state.enabled = newSettings.fabEnabled;
+        }
+
+        if (!this.state.enabled) {
+            this.destroy();
+            return;
+        }
+
+        if (enabledChanged) {
+            this.create();
+        }
+    },
+
+    destroy() {
+        this.detachEventListeners();
+        this.clearAutoCloseTimer();
+
+        if (this.state.resizeTimer) {
+            cancelAnimationFrame(this.state.resizeTimer);
+            this.state.resizeTimer = null;
+        }
+
+        if (this.state.wrapper && this.state.wrapper.parentNode) {
+            this.state.wrapper.remove();
+        }
+
+        this.state.wrapper = null;
+        this.state.shadow = null;
+        this.state.container = null;
+        this.state.fab = null;
+        this.state.menu = null;
+        this.state.isMenuOpen = false;
     }
+};
 
-    const scholarQuery = doi || isbn || articleTitle;
-    if (scholarQuery) {
-        const btn = createDownloadButton("Search in Scholar", `https://scholar.google.com/scholar?q=${encodeURIComponent(scholarQuery)}`, directIcon, "blank");
-        btn.style.order = "3";
-        menu.appendChild(btn);
-    }
+function injectButtons() {
+    if (IGNORED_HOSTS.some(h => window.location.hostname.includes(h))) return;
 
-    chrome.storage.local.get(['sciHubDomain', 'libgenDomain', 'annasDomain', 'nexusBotUsername'], (domains) => {
-        if (doi) {
-            const btn = checkIsSciHub() ? createDownloadButton("Save PDF", extractSciHubPdfUrl(), sciHubIcon, "bypass") : createDownloadButton("Get PDF (Sci-Hub)", `${domains.sciHubDomain || "https://sci-hub.st"}/${doi}`, sciHubIcon, "blank");
-            btn.style.order = "4";
-            menu.appendChild(btn);
-        }
+    const isLibgenDownloadPage = window.location.hostname.includes("libgen") && (window.location.pathname.includes("ads.php") || window.location.pathname.includes("get.php"));
+    if (!shouldShowFAB() && !isLibgenDownloadPage) return;
 
-        if (doi || isbn || articleTitle) {
-            const nexusTarget = doi || isbn || articleTitle;
-            const btn = createDownloadButton("Search in Nexus (Telegram)", `https://t.me/${domains.nexusBotUsername || "sks7777777nexusbot"}?text=${encodeURIComponent(nexusTarget)}`, nexusIcon, "blank", "#000000", "#24A1DE");
-            btn.style.order = "5";
-            menu.appendChild(btn);
-        }
-
-        const bookSearchQuery = isbn || doi || articleTitle;
-        if (bookSearchQuery && !isLibgenDownloadPage) {
-            const libgenUrl = domains.libgenDomain || "https://libgen.li";
-            const dynamicSearchUrl = buildLibgenSearchUrl(libgenUrl, bookSearchQuery);
-            const btn = createDownloadButton("Search Libgen (Books)", dynamicSearchUrl, bookIcon, "blank");
-            btn.style.order = "6";
-            menu.appendChild(btn);
-        }
-
-        if (bookSearchQuery && !isLibgenDownloadPage) {
-            let annasBase = domains.annasDomain || "https://annas-archive.org";
-            try { annasBase = new URL(annasBase).origin; } catch(e) {}
-            const cleanQuery = encodeURIComponent(bookSearchQuery).replace(/%2F/g, '/');
-            const annasUrl = `${annasBase}/s/${cleanQuery}?`;
-            const btn = createDownloadButton("Search Anna's Archive", annasUrl, annasIcon, "blank", "#000000", "#FF6B6B");
-            btn.style.order = "7";
-            menu.appendChild(btn);
-        }
-        
-        if (isLibgenDownloadPage && extractLibgenDownloadUrl()) {
-            const btn = createDownloadButton("Save PDF (Libgen)", extractLibgenDownloadUrl(), bookIcon, "native");
-            btn.style.order = "8";
-            menu.appendChild(btn);
-        }
-    });
-
-    const fab = document.createElement("div");
-    fab.style.cssText = "width:44px; height:44px; background-color:#000000; color:#ffffff; border:2px solid #000000; border-radius:0px; display:flex; justify-content:center; align-items:center; cursor:pointer; box-shadow:4px 4px 0px #7851A9; transition:all 0.1s ease; pointer-events:auto;";
-    fab.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
-    
-    const closedTransform = menuTransform;
-    const openTransform = menuTransform.replace('translateY(-20px) scale(0.95)', 'translateY(0) scale(1)')
-                                     .replace('translateY(20px) scale(0.95)', 'translateY(0) scale(1)');
-
-    let isMenuOpen = false;
-    fab.addEventListener('click', (e) => {
-        e.stopPropagation();
-        isMenuOpen = !isMenuOpen;
-        if (isMenuOpen) {
-            menu.style.opacity = "1";
-            menu.style.pointerEvents = "auto";
-            menu.style.transform = openTransform;
-            fab.style.backgroundColor = "#ffffff";
-            fab.style.color = "#000000";
-            fab.style.boxShadow = "2px 2px 0px #7851A9";
-            fab.style.transform = "translate(2px, 2px)";
-            fab.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
-        } else {
-            menu.style.opacity = "0";
-            menu.style.pointerEvents = "none";
-            menu.style.transform = closedTransform;
-            fab.style.backgroundColor = "#000000";
-            fab.style.color = "#ffffff";
-            fab.style.boxShadow = "4px 4px 0px #7851A9";
-            fab.style.transform = "translate(0px, 0px)";
-            fab.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
-        }
-    });
-
-    // For top positions, FAB should be on top (menu opens downward)
-    // For bottom positions, FAB should be on bottom (menu opens upward)
-    if (fabPosition.includes('top')) {
-        wrapper.appendChild(fab);
-        wrapper.appendChild(menu);
-    } else {
-        wrapper.appendChild(menu);
-        wrapper.appendChild(fab);
-    }
-    
-    document.body.appendChild(wrapper);
-    
-    // Stronger initial-load fix: wait for both layout and a frame
-    const reveal = () => {
-        wrapper.style.visibility = "visible";
-    };
-    
-    if (document.readyState === 'complete') {
-        requestAnimationFrame(reveal);
-    } else {
-        window.addEventListener('load', () => requestAnimationFrame(reveal), { once: true });
+    if (FABManager.state.enabled) {
+        FABManager.create();
     }
 }
+
+let metadataRetryTimer = null;
 
 function initializeExtension() {
-    if (hostMatches(IGNORED_HOSTS)) return;
+    if (IGNORED_HOSTS.some(h => window.location.hostname.includes(h))) return;
 
-    doi = extractDoiStrict();
-    isbn = extractIsbnStrict();
-    articleTitle = extractTitleFallback();
-    pageText = extractPageTextStrict();
-    publisherPdfUrl = extractNativePdfUrlStrict();
+    try {
+        chrome.storage.local.get(['fabEnabled'], (settings) => {
+            const enabled = settings.fabEnabled !== undefined ? settings.fabEnabled : true;
+            FABManager.state.enabled = enabled;
 
-    chrome.runtime.sendMessage({ action: "storeMetadata", doi: doi, isbn: isbn, text: pageText, title: articleTitle });
-    injectButtons();
+            if (!enabled) {
+                FABManager.destroy();
+                return;
+            }
+
+            doi = extractDoiStrict();
+            isbn = extractIsbnStrict();
+            articleTitle = extractTitleFallback();
+            pageText = extractPageTextStrict();
+            publisherPdfUrl = extractNativePdfUrlStrict();
+
+            const isLibgenDownloadPage = window.location.hostname.includes("libgen") && (window.location.pathname.includes("ads.php") || window.location.pathname.includes("get.php"));
+
+            const gatingResult = !doi && !isbn && !publisherPdfUrl && !isLibgenDownloadPage && !isPublisherViewerPage;
+
+            if (gatingResult) {
+                if (!metadataRetryTimer) {
+                    metadataRetryTimer = setTimeout(() => {
+                        metadataRetryTimer = null;
+                        initializeExtension();
+                    }, 1000);
+                }
+                return;
+            }
+
+            if (metadataRetryTimer) {
+                clearTimeout(metadataRetryTimer);
+                metadataRetryTimer = null;
+            }
+
+            try {
+                chrome.runtime.sendMessage({ action: "storeMetadata", doi: doi, isbn: isbn, text: pageText, title: articleTitle });
+            } catch (e) {}
+
+            injectButtons();
+        });
+    } catch (e) {}
 }
 
-initializeExtension();
-
-let lastKnownUrl = location.href;
-new MutationObserver(() => {
-    if (location.href !== lastKnownUrl) {
-        lastKnownUrl = location.href;
-        setTimeout(initializeExtension, 800); 
+chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local') return;
+    if ('fabEnabled' in changes) {
+        FABManager.update({ fabEnabled: changes.fabEnabled.newValue });
     }
-}).observe(document.body, { childList: true, subtree: true });
+});
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        initializeExtension();
+        setupMutationObserver();
+    });
+} else {
+    initializeExtension();
+    setupMutationObserver();
+}
+
+function setupMutationObserver() {
+    if (!document.body) return;
+    let lastKnownUrl = location.href;
+    new MutationObserver(() => {
+        if (location.href !== lastKnownUrl) {
+            lastKnownUrl = location.href;
+            setTimeout(initializeExtension, 800);
+        }
+    }).observe(document.body, { childList: true, subtree: true });
+}
 
 document.addEventListener('click', function(e) {
+    if (e.target.closest && e.target.closest('#paperishere-ui-wrapper')) return;
+
     const aTag = e.target.closest('a');
     if (!aTag || !aTag.href) return;
     
