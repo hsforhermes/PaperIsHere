@@ -1,6 +1,6 @@
 {
   "name": "paperishere",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "private": true,
   "description": "PaperIsHere Chrome Extension (Manifest V3). Extension loads with zero build steps; this package exists only for tests and syntax checks.",
   "scripts": {
