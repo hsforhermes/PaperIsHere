@@ -202,7 +202,6 @@ function extractPageTextStrict() {
 
 function isRestrictedAccess() {
     const textTop = document.body ? document.body.innerText.substring(0, 4000) : "";
-    const isWiley = window.location.hostname.includes('wiley.com');
     
     if (textTop.includes("Get access to the full version") || 
         textTop.includes("Purchase Instant Access") || 
@@ -221,8 +220,6 @@ function isRestrictedAccess() {
     if (hasOABadge || textTop.includes("Open access") || textTop.includes("Open Access") || textTop.includes("Free access")) {
         return false; 
     }
-
-    if (isWiley && !hasOABadge) return true; 
 
     if (document.querySelector('.access-icon.restricted, img[alt*="Restricted"], [data-access-type="restricted"], .icon-lock')) {
         return true;
@@ -347,6 +344,7 @@ function createDownloadButton(title, url, iconHtml, actionType, buttonColor = "#
     btn.className = "paperishere-btn";
     if (actionType === "bypass") {
         btn.href = "javascript:void(0);";
+        btn.dataset.paperishereBypass = "true";
         btn.onclick = (e) => { e.preventDefault(); initiateDirectDownload(url, btn); };
     } else if (actionType === "blank") {
         btn.href = url;
@@ -731,7 +729,8 @@ detectCollisions() {
             if (bookSearchQuery && !isLibgenDownloadPage) {
                 let annasBase = domains.annasDomain || "https://annas-archive.org";
                 try { annasBase = new URL(annasBase).origin; } catch(e) {}
-                const cleanQuery = encodeURIComponent(bookSearchQuery).replace(/%2F/g, '/');
+                const annasQuery = bookSearchQuery.replace(/^10\.\d+\//, '').replace(/[/.]/g, '');
+                const cleanQuery = encodeURIComponent(annasQuery);
                 const annasUrl = `${annasBase}/s/${cleanQuery}?`;
                 const btn = createDownloadButton("Search Anna's Archive", annasUrl, annasIcon, "blank", "#000000", "#FF6B6B");
                 btn.style.order = "7";
@@ -935,7 +934,7 @@ document.addEventListener('click', function(e) {
     const aTag = e.target.closest('a');
     if (!aTag || !aTag.href) return;
     
-    if (aTag.hasAttribute('onclick') && aTag.getAttribute('onclick').includes('initiateDirectDownload')) return;
+    if (aTag.dataset && aTag.dataset.paperishereBypass === "true") return;
 
     const href = aTag.href.toLowerCase();
     const isScholarSite = window.location.hostname.includes('scholar.google.com');
@@ -950,7 +949,12 @@ document.addEventListener('click', function(e) {
                       aTag.innerText.toLowerCase().trim() === 'pdf' ||
                       aTag.innerText.toLowerCase().includes('[pdf]');
                       
-    const isPdfLink = href.endsWith('.pdf') || href.includes('.pdf?') || href.includes('/doi/pdf/') || href.includes('/doi/epdf/') || isPdfText;
+    const hasPdfUrlShape = href.endsWith('.pdf') || href.includes('.pdf?') || href.includes('/doi/pdf/') || href.includes('/doi/epdf/');
+    let isSameOriginPdfText = false;
+    if (isPdfText) {
+        try { isSameOriginPdfText = (window.location.hostname === new URL(aTag.href, window.location.origin).hostname); } catch (e) {}
+    }
+    const isPdfLink = hasPdfUrlShape || (isPdfText && (hostMatches(ACADEMIC_PUBLISHER_DOMAINS) || isSameOriginPdfText));
     
     const isScholarPdf = isScholarSite && 
                          (aTag.querySelector('.gs_ctg2') || aTag.closest('.gs_or_ggsm'));

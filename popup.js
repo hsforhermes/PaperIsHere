@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const annasInput = document.getElementById('annasDomain');
     const nexusBotInput = document.getElementById('nexusBot');
     const apiKeyInput = document.getElementById('apiKey');
+    const geminiOptInInput = document.getElementById('geminiOptIn');
     
     const saveBtn = document.getElementById('saveBtn');
     const reportIssueBtn = document.getElementById('reportIssueBtn');
@@ -90,13 +91,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    chrome.storage.local.get(['saveFolder', 'namingStyle', 'fabEnabled', 'sciHubDomain', 'libgenDomain', 'annasDomain', 'nexusBotUsername', 'geminiApiKey'], (result) => {
+    chrome.storage.local.get(['saveFolder', 'namingStyle', 'fabEnabled', 'sciHubDomain', 'libgenDomain', 'annasDomain', 'nexusBotUsername', 'geminiApiKey', 'geminiOptIn'], (result) => {
         saveLocationInput.value = result.saveFolder || 'Renamed Papers';
         if (result.sciHubDomain) sciHubInput.value = result.sciHubDomain;
         if (result.libgenDomain) libgenInput.value = result.libgenDomain;
         if (result.annasDomain) annasInput.value = result.annasDomain;
         nexusBotInput.value = result.nexusBotUsername || 'sks7777777nexusbot';
+        geminiOptInInput.checked = result.geminiOptIn !== false;
         if (result.geminiApiKey) apiKeyInput.value = result.geminiApiKey;
+        try {
+            if (chrome.storage.session) {
+                chrome.storage.session.get(['geminiApiKey'], (sres) => {
+                    if (sres && sres.geminiApiKey) apiKeyInput.value = sres.geminiApiKey;
+                });
+            }
+        } catch (e) {}
         
         const fabEnabledValue = result.fabEnabled !== false ? 'true' : 'false';
         fabEnabledHidden.value = fabEnabledValue;
@@ -133,6 +142,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!nexus) nexus = 'sks7777777nexusbot';
         
         const fabEnabledValue = fabEnabledHidden.value === 'true';
+        const apiKeyValue = apiKeyInput.value.trim();
+        const geminiOptInValue = geminiOptInInput.checked;
         
         chrome.storage.local.set({ 
             saveFolder: folder,
@@ -142,8 +153,15 @@ document.addEventListener('DOMContentLoaded', () => {
             libgenDomain: libgen,
             annasDomain: annas,
             nexusBotUsername: nexus,
-            geminiApiKey: apiKeyInput.value.trim()
+            geminiOptIn: geminiOptInValue
         }, () => {
+            try {
+                if (chrome.storage.session) {
+                    if (apiKeyValue) chrome.storage.session.set({ geminiApiKey: apiKeyValue }, () => {});
+                    else chrome.storage.session.remove(['geminiApiKey'], () => {});
+                }
+                chrome.storage.local.remove(['geminiApiKey'], () => {});
+            } catch (e) {}
             showStatus('SYSTEM UPDATED');
             setTimeout(() => {
                 advancedOptionsDiv.style.display = 'none';

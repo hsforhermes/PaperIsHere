@@ -6,9 +6,7 @@
   "permissions": [
     "downloads",
     "storage",
-    "activeTab",
-    "scripting",
-    "alarms"
+    "activeTab"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -16,12 +14,12 @@
   "action": {
     "default_popup": "popup.html",
     "default_title": "PaperIsHere Configuration",
-    "default_icon": "icon.png"
+    "default_icon": "icon48.png"
   },
   "icons": {
-    "16": "icon.png",
-    "48": "icon.png",
-    "128": "icon.png"
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
   },
   "background": {
     "service_worker": "background.js"

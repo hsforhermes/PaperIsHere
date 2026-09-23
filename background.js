@@ -1,6 +1,39 @@
 let currentTabMetadata = {};
 let globalLastKnownMetadata = { doi: null, isbn: null, text: null, title: null };
-let activeDownloads = {}; 
+let activeDownloads = {};
+let _sessionRehydrated = false;
+
+async function persistSessionState() {
+    try {
+        if (!chrome.storage.session) return;
+        await chrome.storage.session.set({
+            currentTabMetadata,
+            globalLastKnownMetadata,
+            activeDownloads
+        });
+    } catch (e) {}
+}
+
+function isSamePaper(a, b) {
+    if (!a || !b) return false;
+    if (a.doi && a.doi === b.doi) return true;
+    if (a.isbn && a.isbn === b.isbn) return true;
+    if (!a.doi && !b.doi && !a.isbn && !b.isbn && a.title && a.title === b.title) return true;
+    return false;
+}
+
+async function rehydrateSessionState() {
+    if (_sessionRehydrated) return;
+    _sessionRehydrated = true;
+    try {
+        if (!chrome.storage.session) return;
+        const res = await chrome.storage.session.get(['currentTabMetadata', 'globalLastKnownMetadata', 'activeDownloads']);
+        if (res.currentTabMetadata) currentTabMetadata = res.currentTabMetadata;
+        if (res.globalLastKnownMetadata) globalLastKnownMetadata = res.globalLastKnownMetadata;
+        if (res.activeDownloads) activeDownloads = res.activeDownloads;
+    } catch (e) {}
+}
+rehydrateSessionState();
 
 const STOP_WORDS = [
     'the', 'a', 'an', 'and', 'or', 'of', 'in', 'on', 'with', 'by', 'for', 'to', 'at', 
@@ -11,18 +44,26 @@ const STOP_WORDS = [
 const fallbackSciHubs = ["https://sci-hub.st", "https://sci-hub.ru", "https://sci-hub.se"];
 const fallbackLibgens = ["https://libgen.li", "https://libgen.vg", "https://libgen.rs"];
 
+let _logWriteChain = Promise.resolve();
+
 async function systemLog(type, msg, details = {}) {
     let cleanDetails = JSON.stringify(details);
-    cleanDetails = cleanDetails.replace(/key=[a-zA-Z0-9_-]+/g, 'key=AIzaSy***_HIDDEN_***');
+    cleanDetails = cleanDetails
+        .replace(/key=[a-zA-Z0-9_-]+/g, 'key=AIzaSy***_HIDDEN_***')
+        .replace(/key%3D[a-zA-Z0-9_%-]+/gi, 'key%3DAIzaSy***_HIDDEN_***')
+        .replace(/(["']?key["']?\s*[:=]\s*["']?)(AIza[a-zA-Z0-9_-]+)(["']?)/g, '$1AIzaSy***_HIDDEN_***$3');
     
     const logEntry = `[${new Date().toISOString()}] [${type}] ${msg} | Details: ${cleanDetails}`;
     
-    chrome.storage.local.get(['systemLogs'], (res) => {
-        let logs = res.systemLogs || [];
-        logs.push(logEntry);
-        if (logs.length > 10) logs.shift();
-        chrome.storage.local.set({ systemLogs: logs });
-    });
+    _logWriteChain = _logWriteChain.then(() => new Promise((resolve) => {
+        chrome.storage.local.get(['systemLogs'], (res) => {
+            let logs = res.systemLogs || [];
+            logs.push(logEntry);
+            while (logs.length > 100) logs.shift();
+            chrome.storage.local.set({ systemLogs: logs }, () => resolve());
+        });
+    })).catch(() => {});
+    return _logWriteChain;
 }
 
 function getSystemPrompt(style) {
@@ -81,10 +122,18 @@ async function checkUrl(url) {
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 3500);
-        await fetch(url, { method: 'GET', mode: 'no-cors', signal: controller.signal });
+        const response = await fetch(url, { method: 'HEAD', signal: controller.signal });
         clearTimeout(timeoutId);
-        return true;
-    } catch (error) { return false; }
+        return response.ok;
+    } catch (error) {
+        try {
+            const controller2 = new AbortController();
+            const timeoutId2 = setTimeout(() => controller2.abort(), 3500);
+            const response2 = await fetch(url, { method: 'GET', signal: controller2.signal });
+            clearTimeout(timeoutId2);
+            return response2.ok;
+        } catch (error2) { return false; }
+    }
 }
 
 async function findActiveMirror(urls) {
@@ -92,30 +141,26 @@ async function findActiveMirror(urls) {
     return urls[0];
 }
 
-async function fetchDynamicSciHubs() {
+async function fetchDynamicMirrors(sourceUrl, domainPrefix, fallbacks) {
     try {
-        const response = await fetch('https://sci-hub.pub/');
+        const response = await fetch(sourceUrl);
         const htmlText = await response.text();
         const cleanHtml = htmlText.replace(/<(del|s|strike)[^>]*>[\s\S]*?<\/\1>/gi, '');
-        const regex = /href=["'](https?:\/\/(?:sci-hub\.[a-zA-Z]{2,4}))\/?["']/gi;
+        const regex = new RegExp(`href=["'](https?:\\/\\/(?:${domainPrefix}\\.[a-zA-Z]{2,4}))\\/?["']`, 'gi');
         let mirrors = [];
         let match;
         while ((match = regex.exec(cleanHtml)) !== null) mirrors.push(match[1].toLowerCase());
-        return [...new Set(mirrors)].length > 0 ? [...new Set(mirrors)] : fallbackSciHubs;
-    } catch (error) { return fallbackSciHubs; }
+        const unique = [...new Set(mirrors)];
+        return unique.length > 0 ? unique : fallbacks;
+    } catch (error) { return fallbacks; }
+}
+
+async function fetchDynamicSciHubs() {
+    return fetchDynamicMirrors('https://sci-hub.pub/', 'sci-hub', fallbackSciHubs);
 }
 
 async function fetchDynamicLibgens() {
-    try {
-        const response = await fetch('https://librarygenesis.net/');
-        const htmlText = await response.text();
-        const cleanHtml = htmlText.replace(/<(del|s|strike)[^>]*>[\s\S]*?<\/\1>/gi, '');
-        const regex = /href=["'](https?:\/\/(?:libgen\.[a-zA-Z]{2,4}))\/?["']/gi;
-        let mirrors = [];
-        let match;
-        while ((match = regex.exec(cleanHtml)) !== null) mirrors.push(match[1].toLowerCase());
-        return [...new Set(mirrors)].length > 0 ? [...new Set(mirrors)] : fallbackLibgens;
-    } catch (error) { return fallbackLibgens; }
+    return fetchDynamicMirrors('https://librarygenesis.net/', 'libgen', fallbackLibgens);
 }
 
 async function updateMirrors() {
@@ -253,12 +298,12 @@ function generateFallbackName(data, style, fileExt) {
         let fDate = data.full_date || "00000101";
         if (fDate.includes("null") || fDate.includes("undefined")) fDate = "00000101";
         keywordsPart = cleanWordsArray.map(w => w.toLowerCase()).slice(0, 5).join('-');
-        return `${fDate}_${keywordsPart}_document.${fileExt}`;
+        return `${fDate}_${keywordsPart}.${fileExt}`;
     } else if (style === "model3") {
         let fDate = data.full_date || "00000101";
         if (fDate.includes("null") || fDate.includes("undefined")) fDate = "00000101";
         keywordsPart = cleanWordsArray.map(w => w.toLowerCase()).slice(0, 5).join('-');
-        return `${fDate}_${keywordsPart}_report.${fileExt}`;
+        return `${fDate}_${keywordsPart}.${fileExt}`;
     } else { 
         keywordsPart = cleanWordsArray.map(w => w.toLowerCase()).slice(0, 6).join('_');
         return `${dateStr}-${cleanLastName}${initials}-${keywordsPart}.${fileExt}`;
@@ -267,8 +312,30 @@ function generateFallbackName(data, style, fileExt) {
 
 async function callGemini(inputText, style) {
     return new Promise((resolve) => {
-        chrome.storage.local.get(['geminiApiKey'], async (result) => {
-            const apiKey = result.geminiApiKey;
+        chrome.storage.local.get(['geminiOptIn'], async (optRes) => {
+            if (optRes.geminiOptIn === false) {
+                systemLog("GEMINI_SKIP", "AI naming opted out by user", {});
+                return resolve(null);
+            }
+            const getSession = () => new Promise((res) => {
+                try {
+                    if (!chrome.storage.session) return res({});
+                    chrome.storage.session.get(['geminiApiKey'], (r) => res(r || {}));
+                } catch (e) { res({}); }
+            });
+            const sessionRes = await getSession();
+            let apiKey = sessionRes.geminiApiKey || null;
+            if (!apiKey) {
+                const localRes = await new Promise((res) => chrome.storage.local.get(['geminiApiKey'], (r) => res(r || {})));
+                if (localRes.geminiApiKey) {
+                    apiKey = localRes.geminiApiKey;
+                    try {
+                        if (chrome.storage.session) chrome.storage.session.set({ geminiApiKey: apiKey }, () => {});
+                        chrome.storage.local.remove(['geminiApiKey'], () => {});
+                        systemLog("GEMINI_MIGRATED", "API key moved from local to session storage", {});
+                    } catch (e) {}
+                }
+            }
             if (!apiKey) {
                 systemLog("GEMINI_SKIP", "No API Key provided", {});
                 return resolve(null);
@@ -279,9 +346,9 @@ async function callGemini(inputText, style) {
             try {
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 8000);
-                const apiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+                const apiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
                     body: JSON.stringify({ contents: [{ parts: [{ text: finalPrompt }] }] }),
                     signal: controller.signal
                 });
@@ -295,10 +362,10 @@ async function callGemini(inputText, style) {
                 const data = await apiResponse.json();
                 
                 let aiResult = String(data.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
-                aiResult = aiResult.replace(/```/g, '').replace(/json/gi, '').trim();
+                aiResult = aiResult.replace(/```/g, '').replace(/^json\s*/i, '').trim();
                 
                 if (aiResult.length > 5) {
-                    aiResult = aiResult.replace(/null/gi, '0000');
+                    aiResult = aiResult.replace(/(^|[^a-zA-Z])null([^a-zA-Z]|$)/gi, '$10000$2');
                     resolve(aiResult);
                 } else {
                     systemLog("GEMINI_EMPTY", "AI returned too short or empty result", { response: aiResult });
@@ -405,7 +472,7 @@ async function fallbackBlobDownload(url, filename, sendResponse) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === "logError") {
         systemLog(message.type, message.message, message.details);
-        return true;
+        return false;
     }
 
     if (message.action === "getLogsForReport") {
@@ -417,17 +484,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message.action === "storeMetadata" && sender.tab) {
-        currentTabMetadata[sender.tab.id] = { doi: message.doi, isbn: message.isbn, text: message.text, title: message.title };
+        (async () => {
+        await rehydrateSessionState();
+        const tabId = sender.tab.id;
+        currentTabMetadata[tabId] = { doi: message.doi, isbn: message.isbn, text: message.text, title: message.title, tabId };
         
         if (message.doi || message.isbn || message.title) {
-            const isSamePaper = (message.doi === globalLastKnownMetadata.doi) || (message.isbn === globalLastKnownMetadata.isbn);
+            const samePaper = isSamePaper(message, globalLastKnownMetadata);
             const isPoorText = (!message.text || message.text.length < 300);
             const hasRichGlobal = (globalLastKnownMetadata.text && globalLastKnownMetadata.text.length >= 300);
             
-            if (!(isSamePaper && isPoorText && hasRichGlobal)) {
-                globalLastKnownMetadata = { doi: message.doi, isbn: message.isbn, text: message.text, title: message.title };
+            if (!(samePaper && isPoorText && hasRichGlobal)) {
+                globalLastKnownMetadata = { doi: message.doi, isbn: message.isbn, text: message.text, title: message.title, tabId };
             }
         }
+        persistSessionState();
+        })();
     }
     
     if (message.action === "checkUnpaywall") {
@@ -446,6 +518,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === "triggerDirectDownload") {
         (async () => {
             try {
+                await rehydrateSessionState();
                 const safeUrl = message.url || "";
                 
                 let activeDoi = message.doi;
@@ -464,6 +537,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 
                 const filename = await generateFinalFilename(activeDoi, message.isbn, message.text, originalFilename, message.title);
                 activeDownloads[safeUrl] = filename;
+                persistSessionState();
                 
                 try {
                     chrome.downloads.download({ url: safeUrl, saveAs: false }, (downloadId) => {
@@ -496,6 +570,8 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
         return true;
     }
 
+    (async () => {
+    await rehydrateSessionState();
     const targetUrl = item.url;
     const finalUrl = item.finalUrl || targetUrl;
     let forcedName = activeDownloads[targetUrl] || (finalUrl && activeDownloads[finalUrl]);
@@ -503,8 +579,9 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
     if (forcedName) {
         delete activeDownloads[targetUrl];
         if (finalUrl) delete activeDownloads[finalUrl];
+        persistSessionState();
         suggest({ filename: forcedName, conflictAction: 'uniquify' });
-        return true;
+        return;
     }
 
     chrome.storage.local.get(['saveFolder'], (folderRes) => {
@@ -516,10 +593,10 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
 
         chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
             const tabId = tabs[0]?.id;
-            let meta = currentTabMetadata[tabId];
+            let meta = (tabId != null && currentTabMetadata[tabId]) || null;
             
             if (!meta || (!meta.doi && !meta.isbn && !meta.title) || 
-               (meta.doi === globalLastKnownMetadata.doi && (!meta.text || meta.text.length < 300))) {
+               (isSamePaper(meta, globalLastKnownMetadata) && (!meta.text || meta.text.length < 300))) {
                 meta = globalLastKnownMetadata || {};
             }
             
@@ -549,5 +626,6 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
             } else { suggest({ filename: item.filename }); }
         });
     });
+    })();
     return true; 
 });
