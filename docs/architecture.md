@@ -118,7 +118,7 @@ Three layers plus shared storage:
 | `page.js` | Reads one page into one record: DOI/ISBN/title/text extraction, Restricted Access detection, publisher-PDF discovery, Sci-Hub and viewer-page flags. First in the content-script list so its globals and `readPage` are available to `content.js` |
 | `save.js` | The one Direct Save contract: pending label, `triggerDirectDownload` payload from `pageInfo`, `saved`/`failed` label, `logError` on failure, 3s restore. Callers only supply the element, the url and their labels |
 | `content.js` | FAB menu injection (orders 1–8); Sci-Hub/Libgen page-specific URL extraction; capture-phase PDF-link interception; SPA URL-change re-init; reads `pageInfo` from one `readPage` call |
-| `background.js` | Per-tab + global metadata stores with Memory Shield, rehydrated from `chrome.storage.session`; Crossref/Gemini/Unpaywall calls; mirror scraping & liveness probing; filename generation (AI + fallbacks); download orchestration incl. `onDeterminingFilename` renaming, HTML Shield, blob fallback; serialized ring-buffer logging |
+| `background.js` | Per-tab + global metadata stores with Memory Shield, rehydrated from `chrome.storage.session`; Crossref/Gemini/Unpaywall calls; mirror scraping & liveness probing; one Rename module (request in, saved path out) shared by both download paths; download orchestration incl. `onDeterminingFilename` renaming, HTML Shield, blob fallback; serialized ring-buffer logging |
 | `popup.html` | Save-folder input, naming-style dropdown (6 styles), advanced panel (mirror domains, Nexus bot, Gemini key + opt-in toggle), report/GitHub links |
 | `popup.js` | Loads/saves settings (`chrome.storage.local`, Gemini key in `chrome.storage.session`); domain normalization via `new URL(...).origin` with hardcoded defaults; composes GitHub issue URL embedding sanitized logs |
 
@@ -151,14 +151,14 @@ Async handlers return `true` to keep `sendResponse` alive; the synchronous
 6. **PDF-looking link clicked** → capture-phase listener prevents default,
    marks element (`data-paperishere-bypass`), then calls `directSave` (`save.js`).
 7. Background: DOI from clicked URL if needed; original filename from URL;
-   final name via `generateFinalFilename`; `activeDownloads[url]=filename`;
-   `chrome.downloads.download({url})`. Rename applied via URL lookup in
-   `onDeterminingFilename`.
+   one `generateFinalFilename({doi, text, title, originalFilename})` call;
+   `activeDownloads[url]=filename`; `chrome.downloads.download({url})`. Rename
+   applied via URL lookup in `onDeterminingFilename`.
 8. Chrome blocks/refuses → `fallbackBlobDownload`: fetch → validate (reject
    HTML / <5000 bytes) → data-URL → re-download with explicit filename.
 9. **Passive downloads** hit `onDeterminingFilename` directly: HTML Shield →
    forced-name lookup → caller-tab metadata (threaded, with active-tab fallback) +
-   URL-DOI fallback → 4 s naming race → sanitized-original fallback.
+   URL-DOI fallback → the same `generateFinalFilename` call.
 
 ## 10. Metadata Extraction
 
@@ -215,8 +215,8 @@ call it, differing only in the url and the labels):
 **B. Passive downloads**: `onDeterminingFilename` attributes them to the initiating
 tab's metadata, falling back to the active tab, to `globalLastKnownMetadata`, and/or to
 a DOI parsed from the download URL. A `.pdf` extension alone qualifies for renaming.
-Naming is raced against a 4 s timeout; on failure the sanitized original name is placed
-inside the save folder.
+Both paths then call the same Rename module, which bounds naming at 4 s and places the
+sanitized original name inside the save folder when naming fails or times out.
 
 **HTML Shield**: any `text/html` download is cancelled unless the URL is a Google
 Scholar or Libgen URL — preventing landing pages from saving as PDFs.
@@ -228,7 +228,9 @@ links and internal Sci-Hub/Libgen links are deliberately left alone.
 
 ## 13. Filename Generation and All Naming Styles
 
-Pipeline (`generateFinalFilename`):
+Pipeline (`generateFinalFilename`, the Rename module — one request
+`{doi, text, title, originalFilename}` in, one `folder/name.ext` out; it owns the
+timeout, the save folder and the total fallback, so both download paths behave alike):
 
 1. Extension resolution from original filename (`.php`/`.html` rejected; default `pdf`).
 2. Libgen bibtext shortcut: captured text containing `@book` or `Publisher:` →
@@ -240,7 +242,8 @@ Pipeline (`generateFinalFilename`):
    + up to 2 500 chars context).
 5. Result stripped of trailing `.pdf`; correct extension appended; save-folder prefix
    applied (default `Renamed Papers`). `conflictAction: 'uniquify'` always used.
-6. Total fallback: sanitized original filename.
+6. Total fallback: sanitized original filename, also used when naming outlives the
+   4 s `NAMING_TIMEOUT_MS`. ISBN is attribution only, never a naming input.
 
 Deterministic fallback (`generateFallbackName`) tokenizes titles via
 `smartTokenizeAndFilter` (strips brackets, keeps words >2 chars, drops `STOP_WORDS`):

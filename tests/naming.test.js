@@ -183,3 +183,44 @@ test('memory shield allows overwrite when null-id titles differ', async () => {
   const title = bg.run(`globalLastKnownMetadata.title`);
   assert.equal(title, 'Paper B');
 });
+
+// ---- Rename module: one request in, one saved path out ----
+
+const LIBGEN_TEXT = 'Publisher: Wiley\nTitle: Social context ownership and family firms\nAuthor(s): Sharon Belenzon\nYear: 2015';
+
+test('one naming request yields one folder-prefixed name, with no doi and no fetch', async () => {
+  const bg = loadBackground();
+  const name = await bg.run(`generateFinalFilename({ text: ${JSON.stringify(LIBGEN_TEXT)}, originalFilename: 'download.pdf' })`);
+  assert.match(name, /^Renamed Papers\/2015-BelenzonS-[a-z_]+\.pdf$/);
+});
+
+test('folder and style come from storage, not from the caller', async () => {
+  const bg = loadBackground({ localSeed: { saveFolder: 'Papers', namingStyle: 'date-kebab' } });
+  const name = await bg.run(`generateFinalFilename({ text: ${JSON.stringify(LIBGEN_TEXT)}, originalFilename: 'download.pdf' })`);
+  assert.match(name, /^Papers\/20150101-BelenzonS-[a-z_]+\.pdf$/);
+});
+
+test('naming that outlives the timeout falls back to the sanitized original inside the folder', async () => {
+  const bg = loadBackground({
+    fetchImpl: () => new Promise((resolve) => setTimeout(() => resolve({
+      ok: true,
+      json: async () => ({ message: { title: ['Slow'], author: [{ family: 'Smith', given: 'J' }], issued: { 'date-parts': [[2020]] } } })
+    }), 200))
+  });
+  bg.run('NAMING_TIMEOUT_MS = 20');
+  const name = await bg.run(`generateFinalFilename({ doi: '10.1000/slow', text: null, title: 'Slow', originalFilename: 'scan%20001' })`);
+  assert.equal(name, 'Renamed Papers/scan 001.pdf');
+});
+
+test('a request with nothing to name still returns a usable path', async () => {
+  const bg = loadBackground();
+  const name = await bg.run(`generateFinalFilename({ originalFilename: 'a/b:c*?.pdf' })`);
+  assert.equal(name, 'Renamed Papers/a b c.pdf');
+});
+
+test('a naming step that throws falls back instead of rejecting', async () => {
+  const bg = loadBackground();
+  bg.run(`getCrossref = () => { throw new Error('crossref down'); }`);
+  const name = await bg.run(`generateFinalFilename({ doi: '10.1000/x', originalFilename: 'scan.pdf' })`);
+  assert.equal(name, 'Renamed Papers/scan.pdf');
+});

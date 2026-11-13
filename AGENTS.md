@@ -1,3 +1,7 @@
+## Architecture
+
+Module map, download flow, message contract and storage keys: `docs/architecture.md`.
+
 ## Agent skills
 
 ### Issue tracker

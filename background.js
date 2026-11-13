@@ -379,62 +379,81 @@ async function callGemini(inputText, style) {
     });
 }
 
-async function generateFinalFilename(doi, isbn, text, originalFilename, title) {
-    let fileExt = "pdf";
-    let safeOriginalName = (originalFilename || "Unknown_File.pdf").split('?')[0]; 
-    try { safeOriginalName = decodeURIComponent(safeOriginalName); } catch(e) {}
-    
-    const extMatch = safeOriginalName.match(/\.([a-zA-Z0-9]+)$/);
-    if (extMatch) {
-        const potentialExt = extMatch[1].toLowerCase();
-        if (potentialExt !== "php" && potentialExt !== "html") fileExt = potentialExt;
+// Rename module: one naming request in, one saved path out.
+// Owns extension, save folder, libgen shortcut, crossref → AI, timeout and the raw-name
+// fallback, so the Direct Save and Passive Rename paths behave the same and neither
+// can hang on naming. A timed-out or unnameable request falls back instead of rejecting.
+// let, not const, so tests can shrink the timeout.
+let NAMING_TIMEOUT_MS = 4000;
+
+function extensionOf(name) {
+    const match = name.match(/\.([a-zA-Z0-9]+)$/);
+    if (!match) return "pdf";
+    const ext = match[1].toLowerCase();
+    return (ext === "php" || ext === "html") ? "pdf" : ext;
+}
+
+function fallbackFilename(originalFilename, fileExt) {
+    let name = (originalFilename || "Unknown_File.pdf").split('?')[0];
+    try { name = decodeURIComponent(name); } catch (e) {}
+    name = name.replace(/[^a-zA-Z0-9.\-]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!name.includes('.')) name += `.${fileExt}`;
+    return name;
+}
+
+async function nameDocument({ doi, text, title, originalFilename, fileExt, style }) {
+    if (text && (text.includes('@book') || text.includes('Publisher:'))) {
+        const data = parseLibgenText(text);
+        if (data) return generateFallbackName(data, style, fileExt);
     }
 
-    return new Promise((resolve) => {
-        chrome.storage.local.get(['saveFolder', 'namingStyle'], async (res) => {
-            const folder = res.saveFolder || 'Renamed Papers';
-            const style = res.namingStyle || 'kebab';
-            let finalName = null;
-            let crossrefData = null;
+    if (doi) {
+        const crossrefData = await getCrossref(doi);
+        if (crossrefData) {
+            const structuredInput = `Title: "${crossrefData.title}"\nAuthor: ${crossrefData.last_name}, ${crossrefData.other_names}\nDate: ${crossrefData.full_date || crossrefData.year}\nDOI: ${doi}\nContext: ${(text || "").substring(0, 1500)}`;
+            return await callGemini(structuredInput, style) || generateFallbackName(crossrefData, style, fileExt);
+        }
+    }
 
-            if (text && (text.includes('@book') || text.includes('Publisher:'))) {
-                const data = parseLibgenText(text);
-                if (data) finalName = generateFallbackName(data, style, fileExt);
-            }
-            
-            if (!finalName && doi) {
-                crossrefData = await getCrossref(doi);
-                if (crossrefData) {
-                    const structuredInput = `Title: "${crossrefData.title}"\nAuthor: ${crossrefData.last_name}, ${crossrefData.other_names}\nDate: ${crossrefData.full_date || crossrefData.year}\nDOI: ${doi}\nContext: ${text.substring(0, 1500)}`;
-                    finalName = await callGemini(structuredInput, style);
-                    if (!finalName) finalName = generateFallbackName(crossrefData, style, fileExt);
-                }
-            }
+    if (text || title) {
+        let inputStr = "";
+        if (title) inputStr += `Document Title: ${title}\n`;
+        if (doi) inputStr += `Document DOI: ${doi}\n`;
+        if (originalFilename && originalFilename !== "Unknown_File.pdf") {
+            inputStr += `Target Document Hint: ${originalFilename}\n`;
+        }
+        if (text) inputStr += `\nContext Data:\n${text.substring(0, 2500)}`;
+        return await callGemini(inputStr, style);
+    }
 
-            if (!finalName && (text || title)) {
-                let inputStr = "";
-                if (title) inputStr += `Document Title: ${title}\n`;
-                if (doi) inputStr += `Document DOI: ${doi}\n`;
-                if (safeOriginalName && safeOriginalName !== "Unknown_File.pdf") {
-                    inputStr += `Target Document Hint: ${safeOriginalName}\n`;
-                }
-                if (text) {
-                    inputStr += `\nContext Data:\n${text.substring(0, 2500)}`;
-                }
-                finalName = await callGemini(inputStr, style);
-            }
+    return null;
+}
 
-            if (finalName) {
-                finalName = finalName.replace(/\.pdf$/i, '') + `.${fileExt}`;
-                resolve(`${folder}/${finalName}`);
-            } else {
-                systemLog("NAMING_FALLBACK", "Using original fallback name", { doi, original: safeOriginalName });
-                let fallbackName = safeOriginalName.replace(/[^a-zA-Z0-9.\-]/g, ' ').replace(/\s+/g, ' ').trim();
-                if (!fallbackName.includes('.')) fallbackName += `.${fileExt}`;
-                resolve(`${folder}/${fallbackName}`);
-            }
-        });
-    });
+async function generateFinalFilename({ doi, text, title, originalFilename }) {
+    const original = fallbackFilename(originalFilename, "pdf");
+    const fileExt = extensionOf(original);
+
+    const settings = await chrome.storage.local.get(['saveFolder', 'namingStyle']);
+    const folder = settings.saveFolder || 'Renamed Papers';
+    const style = settings.namingStyle || 'kebab';
+
+    let timeoutId;
+    let named = null;
+    try {
+        named = await Promise.race([
+            nameDocument({ doi, text, title, originalFilename: original, fileExt, style }),
+            new Promise((resolve) => { timeoutId = setTimeout(() => resolve(null), NAMING_TIMEOUT_MS); })
+        ]);
+    } catch (e) {
+        systemLog("NAMING_ERROR", e.message, { doi });
+    } finally {
+        clearTimeout(timeoutId);
+    }
+
+    if (named) return `${folder}/${named.replace(/\.pdf$/i, '')}.${fileExt}`;
+
+    systemLog("NAMING_FALLBACK", "Using original fallback name", { doi, original });
+    return `${folder}/${original}`;
 }
 
 async function fallbackBlobDownload(url, filename, sendResponse) {
@@ -535,7 +554,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 }
                 try { originalFilename = decodeURIComponent(originalFilename); } catch(e){}
                 
-                const filename = await generateFinalFilename(activeDoi, message.isbn, message.text, originalFilename, message.title);
+                const filename = await generateFinalFilename({ doi: activeDoi, text: message.text, title: message.title, originalFilename });
                 activeDownloads[safeUrl] = filename;
                 persistSessionState();
                 
@@ -610,18 +629,11 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
             
             if (activeDoi || activeIsbn || item.filename.toLowerCase().endsWith('.pdf')) {
                 try {
-                    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 4000));
-                    const filename = await Promise.race([
-                        generateFinalFilename(activeDoi, activeIsbn, activeText, item.filename, activeTitle),
-                        timeoutPromise
-                    ]);
+                    const filename = await generateFinalFilename({ doi: activeDoi, text: activeText, title: activeTitle, originalFilename: item.filename });
                     suggest({ filename: filename, conflictAction: 'uniquify' });
                 } catch (e) { 
                     systemLog("SUGGEST_FAIL", e.message, { file: item.filename });
-                    let safeRawName = item.filename.split('?')[0];
-                    try { safeRawName = decodeURIComponent(safeRawName); } catch(err){}
-                    safeRawName = safeRawName.replace(/[^a-zA-Z0-9.\-]/g, ' ').replace(/\s+/g, ' ').trim();
-                    suggest({ filename: `${folder}/${safeRawName}`, conflictAction: 'uniquify' }); 
+                    suggest({ filename: `${folder}/${fallbackFilename(item.filename, 'pdf')}`, conflictAction: 'uniquify' }); 
                 }
             } else { suggest({ filename: item.filename }); }
         });
