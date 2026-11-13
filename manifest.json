@@ -30,6 +30,7 @@
         "<all_urls>"
       ],
       "js": [
+        "page.js",
         "content.js"
       ]
     }

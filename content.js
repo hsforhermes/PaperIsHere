@@ -1,72 +1,15 @@
-let doi = null;
-let isbn = null;
-let articleTitle = null;
-let publisherPdfUrl = null;
-let pageText = "";
-const isPublisherViewerPage = window.location.pathname.includes('/doi/epdf/') || window.location.pathname.includes('/doi/epub/');
-
-const IGNORED_HOSTS = ['gemini.google.com', 'chatgpt.com', 'chat.openai.com', 'claude.ai', 'perplexity.ai'];
-
-function hostMatches(domains) {
-    const hostname = window.location.hostname.toLowerCase();
-    return domains.some(d => hostname === d || hostname.endsWith('.' + d));
-}
-
-const ACADEMIC_PUBLISHER_DOMAINS = [
-    'journals.sagepub.com',
-    'sciencedirect.com',
-    'link.springer.com',
-    'nature.com',
-    'onlinelibrary.wiley.com',
-    'tandfonline.com',
-    'oxfordacademic.com',
-    'academic.oup.com',
-    'cambridge.org',
-    'jstor.org',
-    'dl.acm.org',
-    'ieeexplore.ieee.org',
-    'journals.aps.org',
-    'journals.ams.org',
-    'annualreviews.org',
-    'cell.com',
-    'pnas.org',
-    'bmj.com',
-    'nejm.org',
-    'thelancet.com',
-    'emerald.com',
-    'degruyter.com',
-    'frontiersin.org',
-    'mdpi.com',
-    'plos.org',
-    'royalsocietypublishing.org',
-    'ebsco.com',
-    'proquest.com',
-    'arxiv.org',
-    'biorxiv.org',
-    'medrxiv.org',
-    'ssrn.com',
-    'researchgate.net',
-    'academia.edu',
-    'scholar.google.com',
-    'pubmed.ncbi.nlm.nih.gov',
-    'nih.gov',
-    'acs.org',
-    'rsc.org',
-    'aaas.org',
-    'science.org',
-    'karger.com',
-    'thieme-connect.com'
-];
+// Page reading lives in page.js (loaded first). This file owns the FAB, menu and links.
+let pageInfo = { doi: null, isbn: null, title: null, text: "", pdfUrl: null, restricted: false, sciHub: false, viewer: isViewerPath(window.location) };
 
 function shouldShowFAB() {
-    if (hostMatches(IGNORED_HOSTS)) return false;
+    if (hostMatches(window.location.hostname, IGNORED_HOSTS)) return false;
 
     const pathname = window.location.pathname.toLowerCase();
     const href = window.location.href.toLowerCase();
 
-    const hasDoi = !!doi;
-    const hasIsbn = !!isbn;
-    const hasPdfUrl = !!publisherPdfUrl;
+    const hasDoi = !!pageInfo.doi;
+    const hasIsbn = !!pageInfo.isbn;
+    const hasPdfUrl = !!pageInfo.pdfUrl;
     
     const hasAcademicPath = pathname.includes('/doi/') || 
                             pathname.includes('/article/') || 
@@ -78,7 +21,7 @@ function shouldShowFAB() {
                             pathname.includes('/pdf/') ||
                             href.includes('jstor.org/stable/');
 
-    const isOnPublisher = hostMatches(ACADEMIC_PUBLISHER_DOMAINS);
+    const isOnPublisher = hostMatches(window.location.hostname, ACADEMIC_PUBLISHER_DOMAINS);
     
     if (hasDoi || hasIsbn || hasPdfUrl) {
         return true;
@@ -88,7 +31,7 @@ function shouldShowFAB() {
         return true;
     }
     
-    if (isPublisherViewerPage) {
+    if (pageInfo.viewer) {
         return true;
     }
 
@@ -97,178 +40,6 @@ function shouldShowFAB() {
 
 if (window.location.href.includes('/doi/epub/')) {
     window.location.replace(window.location.href.replace('/doi/epub/', '/doi/epdf/'));
-}
-
-function checkIsSciHub() {
-    const host = window.location.hostname.toLowerCase();
-    if (host.includes("sci-hub") || host.includes("scihub") || host.includes("sci-net")) return true;
-    if (document.getElementById('menu') && document.getElementById('article')) return true;
-    return false;
-}
-
-function extractDoiStrict() {
-    const metaDoi = document.querySelector('meta[name="citation_doi"], meta[name="prism.doi"], meta[name="dc.identifier"]');
-    if (metaDoi && metaDoi.content) {
-        const match = metaDoi.content.match(/\b(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)\b/i);
-        if (match) return match[1].replace(/[.;,]$/, '');
-    }
-    
-    const jstorMatch = window.location.href.match(/jstor\.org\/stable\/(\d+)/i);
-    if (jstorMatch) {
-        return `10.2307/${jstorMatch[1]}`;
-    }
-
-    const urlMatch = window.location.href.match(/\b(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)\b/i);
-    if (urlMatch) {
-        const href = window.location.href.toLowerCase();
-        if (href.includes('/doi/') || href.includes('/article/') || href.includes('abs') || checkIsSciHub()) {
-            return urlMatch[1].replace(/[.;,]$/, '');
-        }
-    }
-
-    if (window.location.hostname.includes('scholar.google.com')) {
-        const urlParams = new URLSearchParams(window.location.search);
-        const q = urlParams.get('q') || '';
-        const qMatch = q.match(/\b(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)\b/i);
-        if (qMatch) return qMatch[1].replace(/[.;,]$/, '');
-        
-        const searchInput = document.querySelector('input[name="q"]');
-        if (searchInput && searchInput.value) {
-            const inputMatch = searchInput.value.match(/\b(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)\b/i);
-            if (inputMatch) return inputMatch[1].replace(/[.;,]$/, '');
-        }
-    }
-    
-    const textTop = document.body ? document.body.textContent.substring(0, 10000) : "";
-    const textDoiMatch = textTop.match(/DOI\s*[:\u200B]?\s*\b(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)\b/i) || 
-                         textTop.match(/https?:\/\/(?:dx\.)?doi\.org\/(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)\b/i) ||
-                         textTop.match(/doi\s*=\s*[{"]?(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)[}"]?/i);
-    if (textDoiMatch) {
-        return textDoiMatch[1].replace(/[.;,]$/, '');
-    }
-
-    return null;
-}
-
-function extractIsbnStrict() {
-    const metaIsbn = document.querySelector('meta[name="citation_isbn"], meta[property="isbn"], meta[name="prism.isbn"], meta[name="dc.identifier"]');
-    if (metaIsbn && metaIsbn.content) {
-        const clean = metaIsbn.content.replace(/[^0-9X]/gi, '');
-        if (clean.length === 10 || clean.length === 13) return clean;
-    }
-    
-    const urlMatch = window.location.pathname.match(/\b(97[89]\d{10})\b/);
-    if (urlMatch) return urlMatch[1];
-
-    const textTop = document.body ? document.body.textContent.substring(0, 5000) : "";
-    const textMatch = textTop.match(/ISBN(?:-1[03])?\s*[:\u200B]?\s*(97[89][- \u2013]?\d{1,5}[- \u2013]?\d{1,7}[- \u2013]?\d{1,6}[- \u2013]?\d|\d{1,5}[- \u2013]?\d{1,7}[- \u2013]?\d{1,6}[- \u2013]?[\dX])/i);
-    if (textMatch) {
-        const clean = textMatch[1].replace(/[^0-9X]/gi, '');
-        if (clean.length === 10 || clean.length === 13) return clean;
-    }
-
-    if (window.location.hostname.includes("libgen")) {
-        const libgenMatch = document.body.textContent.match(/\b(97[89][- \u2013]?\d{1,5}[- \u2013]?\d{1,7}[- \u2013]?\d{1,6}[- \u2013]?\d)\b/);
-        if (libgenMatch) {
-            const clean = libgenMatch[1].replace(/[^0-9X]/gi, '');
-            if (clean.length === 10 || clean.length === 13) return clean;
-        }
-    }
-    
-    return null;
-}
-
-function extractTitleFallback() {
-    const metaTitle = document.querySelector('meta[name="citation_title"], meta[name="DC.Title"], meta[name="prism.title"], meta[property="og:title"]');
-    if (metaTitle && metaTitle.content) return metaTitle.content.trim();
-
-    const h1 = document.querySelector('h1');
-    if (h1 && h1.innerText && h1.innerText.length > 5) {
-        return h1.innerText.trim().replace(/\n+/g, ' ');
-    }
-
-    return document.title ? document.title.split('|')[0].split('-')[0].trim() : null;
-}
-
-function extractPageTextStrict() {
-    if (window.location.hostname.includes("scholar.google.com")) {
-        const results = document.querySelectorAll('.gs_ri');
-        if (results.length > 0) {
-            return Array.from(results).map(r => r.innerText).join('\n\n').substring(0, 3000);
-        }
-    }
-    return document.body ? document.body.innerText.substring(0, 3000) : "";
-}
-
-function isRestrictedAccess() {
-    const textTop = document.body ? document.body.innerText.substring(0, 4000) : "";
-    
-    if (textTop.includes("Get access to the full version") || 
-        textTop.includes("Purchase Instant Access") || 
-        textTop.includes("Institutional Login") ||
-        textTop.includes("Log in to Wiley Online Library") ||
-        document.querySelector('.login-options, .paywall-article, .access-options, #paywall-banner, .article-paywall')) {
-        return true; 
-    }
-
-    const openAccessSelectors = [
-        '.access-icon.open', '.open-access', 'img[alt*="Open Access"]', 
-        'img[alt*="Free Access"]', '.doi-access.open', '.oa-open'
-    ];
-    const hasOABadge = document.querySelector(openAccessSelectors.join(', '));
-    
-    if (hasOABadge || textTop.includes("Open access") || textTop.includes("Open Access") || textTop.includes("Free access")) {
-        return false; 
-    }
-
-    if (document.querySelector('.access-icon.restricted, img[alt*="Restricted"], [data-access-type="restricted"], .icon-lock')) {
-        return true;
-    }
-
-    if (textTop.includes("Restricted access") || textTop.includes("Purchase article")) {
-        return true;
-    }
-    
-    return false;
-}
-
-function sanitizePublisherUrl(rawUrl) {
-    if (!rawUrl) return null;
-    let safeUrl = rawUrl;
-    if (!safeUrl.startsWith('http')) safeUrl = new URL(safeUrl, window.location.origin).href;
-    safeUrl = safeUrl.split('?')[0]; 
-    if (safeUrl.includes('/doi/epub/')) safeUrl = safeUrl.replace('/doi/epub/', '/doi/epdf/');
-    if (safeUrl.includes('/doi/reader/')) safeUrl = safeUrl.replace('/doi/reader/', '/doi/pdf/');
-    return safeUrl;
-}
-
-function extractNativePdfUrlStrict() {
-    if (isRestrictedAccess()) return null; 
-
-    const meta = document.querySelector('meta[name="citation_pdf_url"]');
-    if (meta && meta.content) return sanitizePublisherUrl(meta.content);
-
-    const rgBtn = document.querySelector('a[href*="fulltext"], a[href*="download"][href*="publication"]');
-    if (window.location.hostname.includes('researchgate.net') && rgBtn) return sanitizePublisherUrl(rgBtn.href);
-
-    const academiaBtn = document.querySelector('a.js-swp-download-button, a[href*="/attachments/download/"]');
-    if (window.location.hostname.includes('academia.edu') && academiaBtn) return sanitizePublisherUrl(academiaBtn.href);
-
-    const links = Array.from(document.querySelectorAll('a'));
-    for (const a of links) {
-        const href = (a.href || "").toLowerCase();
-        const text = (a.innerText || a.textContent || "").toLowerCase().trim();
-        
-        if (!href || href === window.location.href.toLowerCase() || href.startsWith('javascript:')) continue;
-        if (href.includes("sci-hub") || href.includes("libgen") || href.includes("annas-archive") || href.includes("t.me")) continue;
-        if (href.includes('onlinelibrary.wiley.com/doi/pdf/') && isRestrictedAccess()) continue;
-
-        if (href.includes('/doi/pdf/') || href.includes('/doi/epdf/') || href.includes('/doi/epub/') || href.includes('/doi/reader/')) return sanitizePublisherUrl(a.href);
-        if (text === 'download pdf' || text === 'article pdf' || text.includes('pdf/epub')) return sanitizePublisherUrl(a.href);
-    }
-    
-    if (isPublisherViewerPage && doi) return sanitizePublisherUrl(`https://journals.sagepub.com/doi/pdf/${doi}`);
-    return null;
 }
 
 function extractSciHubPdfUrl() { 
@@ -319,7 +90,7 @@ function initiateDirectDownload(originalUrl, btnElement) {
     btnElement.style.pointerEvents = "none";
 
     let downloadUrl = originalUrl;
-    if (checkIsSciHub()) {
+    if (pageInfo.sciHub) {
         downloadUrl = extractSciHubPdfUrl();
     } else if (window.location.hostname.includes("libgen") && (window.location.pathname.includes("ads.php") || window.location.pathname.includes("get.php"))) {
         const libgenDirectUrl = extractLibgenDownloadUrl();
@@ -327,7 +98,7 @@ function initiateDirectDownload(originalUrl, btnElement) {
     }
 
     chrome.runtime.sendMessage({
-        action: "triggerDirectDownload", url: downloadUrl, doi: doi, isbn: isbn, text: pageText, title: articleTitle
+        action: "triggerDirectDownload", url: downloadUrl, doi: pageInfo.doi, isbn: pageInfo.isbn, text: pageInfo.text, title: pageInfo.title
     }, (response) => {
         if (chrome.runtime.lastError || !response || !response.success) {
             btnElement.innerHTML = `<span style="color:red; font-size:10px;">✖ FAILED</span>`;
@@ -349,7 +120,7 @@ function createDownloadButton(title, url, iconHtml, actionType, buttonColor = "#
     } else if (actionType === "blank") {
         btn.href = url;
         btn.target = "_blank";
-        if (title.includes("Libgen")) btn.addEventListener('click', () => chrome.storage.local.set({ activeLibgenSearchContext: { doi: doi, isbn: isbn } }));
+        if (title.includes("Libgen")) btn.addEventListener('click', () => chrome.storage.local.set({ activeLibgenSearchContext: { doi: pageInfo.doi, isbn: pageInfo.isbn } }));
     } else if (actionType === "native") {
         btn.href = url;
         btn.target = "_self";
@@ -674,11 +445,11 @@ detectCollisions() {
 
         const isLibgenDownloadPage = window.location.hostname.includes("libgen") && (window.location.pathname.includes("ads.php") || window.location.pathname.includes("get.php"));
 
-        if (publisherPdfUrl && !isPublisherViewerPage) {
-            const btn = createDownloadButton("Save PDF (Direct)", publisherPdfUrl, directIcon, "bypass", "#000000", "#10B981");
+        if (pageInfo.pdfUrl && !pageInfo.viewer) {
+            const btn = createDownloadButton("Save PDF (Direct)", pageInfo.pdfUrl, directIcon, "bypass", "#000000", "#10B981");
             btn.style.order = "1";
             this.state.menu.appendChild(btn);
-        } else if (publisherPdfUrl && isPublisherViewerPage) {
+        } else if (pageInfo.pdfUrl && pageInfo.viewer) {
             const infoBtn = document.createElement("div");
             infoBtn.className = "paperishere-info-badge";
             infoBtn.style.order = "1";
@@ -686,8 +457,8 @@ detectCollisions() {
             this.state.menu.appendChild(infoBtn);
         }
 
-        if (doi && !isPublisherViewerPage) {
-            chrome.runtime.sendMessage({ action: "checkUnpaywall", doi: doi }, (response) => {
+        if (pageInfo.doi && !pageInfo.viewer) {
+            chrome.runtime.sendMessage({ action: "checkUnpaywall", doi: pageInfo.doi }, (response) => {
                 if (response && response.url) {
                     const btn = createDownloadButton("Save PDF (Unpaywall)", response.url, directIcon, "bypass", "#000000", "#10B981");
                     btn.style.order = "2";
@@ -696,7 +467,7 @@ detectCollisions() {
             });
         }
 
-        const scholarQuery = doi || isbn || articleTitle;
+        const scholarQuery = pageInfo.doi || pageInfo.isbn || pageInfo.title;
         if (scholarQuery) {
             const btn = createDownloadButton("Search in Scholar", `https://scholar.google.com/scholar?q=${encodeURIComponent(scholarQuery)}`, directIcon, "blank");
             btn.style.order = "3";
@@ -704,20 +475,20 @@ detectCollisions() {
         }
 
         chrome.storage.local.get(['sciHubDomain', 'libgenDomain', 'annasDomain', 'nexusBotUsername'], (domains) => {
-            if (doi) {
-                const btn = checkIsSciHub() ? createDownloadButton("Save PDF", extractSciHubPdfUrl(), sciHubIcon, "bypass") : createDownloadButton("Get PDF (Sci-Hub)", `${domains.sciHubDomain || "https://sci-hub.st"}/${doi}`, sciHubIcon, "blank");
+            if (pageInfo.doi) {
+                const btn = pageInfo.sciHub ? createDownloadButton("Save PDF", extractSciHubPdfUrl(), sciHubIcon, "bypass") : createDownloadButton("Get PDF (Sci-Hub)", `${domains.sciHubDomain || "https://sci-hub.st"}/${pageInfo.doi}`, sciHubIcon, "blank");
                 btn.style.order = "4";
                 this.state.menu.appendChild(btn);
             }
 
-            if (doi || isbn || articleTitle) {
-                const nexusTarget = doi || isbn || articleTitle;
+            if (pageInfo.doi || pageInfo.isbn || pageInfo.title) {
+                const nexusTarget = pageInfo.doi || pageInfo.isbn || pageInfo.title;
                 const btn = createDownloadButton("Search in Nexus (Telegram)", `https://t.me/${domains.nexusBotUsername || "sks7777777nexusbot"}?text=${encodeURIComponent(nexusTarget)}`, nexusIcon, "blank", "#000000", "#24A1DE");
                 btn.style.order = "5";
                 this.state.menu.appendChild(btn);
             }
 
-            const bookSearchQuery = isbn || doi || articleTitle;
+            const bookSearchQuery = pageInfo.isbn || pageInfo.doi || pageInfo.title;
             if (bookSearchQuery && !isLibgenDownloadPage) {
                 const libgenUrl = domains.libgenDomain || "https://libgen.li";
                 const dynamicSearchUrl = buildLibgenSearchUrl(libgenUrl, bookSearchQuery);
@@ -866,15 +637,11 @@ function initializeExtension() {
                 return;
             }
 
-            doi = extractDoiStrict();
-            isbn = extractIsbnStrict();
-            articleTitle = extractTitleFallback();
-            pageText = extractPageTextStrict();
-            publisherPdfUrl = extractNativePdfUrlStrict();
+            pageInfo = readPage({ document, location });
 
             const isLibgenDownloadPage = window.location.hostname.includes("libgen") && (window.location.pathname.includes("ads.php") || window.location.pathname.includes("get.php"));
 
-            const gatingResult = !doi && !isbn && !publisherPdfUrl && !isLibgenDownloadPage && !isPublisherViewerPage;
+            const gatingResult = !pageInfo.doi && !pageInfo.isbn && !pageInfo.pdfUrl && !isLibgenDownloadPage && !pageInfo.viewer;
 
             if (gatingResult) {
                 if (!metadataRetryTimer) {
@@ -892,7 +659,7 @@ function initializeExtension() {
             }
 
             try {
-                chrome.runtime.sendMessage({ action: "storeMetadata", doi: doi, isbn: isbn, text: pageText, title: articleTitle });
+                chrome.runtime.sendMessage({ action: "storeMetadata", doi: pageInfo.doi, isbn: pageInfo.isbn, text: pageInfo.text, title: pageInfo.title });
             } catch (e) {}
 
             injectButtons();
@@ -954,13 +721,13 @@ document.addEventListener('click', function(e) {
     if (isPdfText) {
         try { isSameOriginPdfText = (window.location.hostname === new URL(aTag.href, window.location.origin).hostname); } catch (e) {}
     }
-    const isPdfLink = hasPdfUrlShape || (isPdfText && (hostMatches(ACADEMIC_PUBLISHER_DOMAINS) || isSameOriginPdfText));
+    const isPdfLink = hasPdfUrlShape || (isPdfText && (hostMatches(window.location.hostname, ACADEMIC_PUBLISHER_DOMAINS) || isSameOriginPdfText));
     
     const isScholarPdf = isScholarSite && 
                          (aTag.querySelector('.gs_ctg2') || aTag.closest('.gs_or_ggsm'));
 
     if ((isPdfLink || isScholarPdf) && href.startsWith('http')) {
-        if (checkIsSciHub() || isLibgenSite) return;
+        if (pageInfo.sciHub || isLibgenSite) return;
 
         e.preventDefault();
         e.stopPropagation();
@@ -974,10 +741,10 @@ document.addEventListener('click', function(e) {
         chrome.runtime.sendMessage({
             action: "triggerDirectDownload",
             url: aTag.href,
-            doi: doi, 
-            isbn: isbn,
-            text: pageText,
-            title: articleTitle
+            doi: pageInfo.doi,
+            isbn: pageInfo.isbn,
+            text: pageInfo.text,
+            title: pageInfo.title
         }, (response) => {
             if (chrome.runtime.lastError || !response || !response.success) {
                 aTag.innerHTML = `<span style="color:red; font-weight:bold; background:#fff0f0; padding:2px 4px; border-radius:4px;">✖ FAILED</span>`;
