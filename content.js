@@ -84,11 +84,19 @@ const nexusIcon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" s
 const bookIcon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>`;
 const annasIcon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>`;
 
-function initiateDirectDownload(originalUrl, btnElement) {
-    const originalHTML = btnElement.innerHTML;
-    btnElement.innerHTML = `<span style="color:#7851A9;">⏳</span> AI NAMING...`;
-    btnElement.style.pointerEvents = "none";
+const FAB_SAVE_LABELS = {
+    pending: `<span style="color:#7851A9;">⏳</span> AI NAMING...`,
+    saved: `<span style="color:green;">✔</span> SAVED!`,
+    failed: `<span style="color:red; font-size:10px;">✖ FAILED</span>`
+};
 
+const LINK_SAVE_LABELS = {
+    pending: `<span style="color:#7851A9; font-weight:bold; background:#f0f0f0; padding:2px 4px; border-radius:4px;">⏳ AI SAVING...</span>`,
+    saved: `<span style="color:green; font-weight:bold; background:#f0fff0; padding:2px 4px; border-radius:4px;">✔ SAVED!</span>`,
+    failed: `<span style="color:red; font-weight:bold; background:#fff0f0; padding:2px 4px; border-radius:4px;">✖ FAILED</span>`
+};
+
+function initiateDirectDownload(originalUrl, btnElement) {
     let downloadUrl = originalUrl;
     if (pageInfo.sciHub) {
         downloadUrl = extractSciHubPdfUrl();
@@ -97,17 +105,7 @@ function initiateDirectDownload(originalUrl, btnElement) {
         if (libgenDirectUrl) downloadUrl = libgenDirectUrl;
     }
 
-    chrome.runtime.sendMessage({
-        action: "triggerDirectDownload", url: downloadUrl, doi: pageInfo.doi, isbn: pageInfo.isbn, text: pageInfo.text, title: pageInfo.title
-    }, (response) => {
-        if (chrome.runtime.lastError || !response || !response.success) {
-            btnElement.innerHTML = `<span style="color:red; font-size:10px;">✖ FAILED</span>`;
-            chrome.runtime.sendMessage({ action: "logError", type: "UI_DOWNLOAD_FAIL", message: "Download triggered via UI failed", details: { url: downloadUrl, error: response?.error } });
-        } else {
-            btnElement.innerHTML = `<span style="color:green;">✔</span> SAVED!`;
-        }
-        setTimeout(() => { btnElement.innerHTML = originalHTML; btnElement.style.pointerEvents = "auto"; }, 3000);
-    });
+    directSave({ element: btnElement, url: downloadUrl, page: pageInfo, labels: FAB_SAVE_LABELS, logType: "UI_DOWNLOAD_FAIL" });
 }
 
 function createDownloadButton(title, url, iconHtml, actionType, buttonColor = "#000000", hoverColor = "#7851A9") {
@@ -732,30 +730,6 @@ document.addEventListener('click', function(e) {
         e.preventDefault();
         e.stopPropagation();
 
-        const originalHTML = aTag.innerHTML;
-        aTag.innerHTML = `<span style="color:#7851A9; font-weight:bold; background:#f0f0f0; padding:2px 4px; border-radius:4px;">⏳ AI SAVING...</span>`;
-        
-        const originalPointerEvents = aTag.style.pointerEvents;
-        aTag.style.pointerEvents = "none";
-
-        chrome.runtime.sendMessage({
-            action: "triggerDirectDownload",
-            url: aTag.href,
-            doi: pageInfo.doi,
-            isbn: pageInfo.isbn,
-            text: pageInfo.text,
-            title: pageInfo.title
-        }, (response) => {
-            if (chrome.runtime.lastError || !response || !response.success) {
-                aTag.innerHTML = `<span style="color:red; font-weight:bold; background:#fff0f0; padding:2px 4px; border-radius:4px;">✖ FAILED</span>`;
-                chrome.runtime.sendMessage({ action: "logError", type: "INTERCEPTOR_FAIL", message: "Background download failed from interceptor", details: { url: aTag.href, error: response?.error } });
-            } else {
-                aTag.innerHTML = `<span style="color:green; font-weight:bold; background:#f0fff0; padding:2px 4px; border-radius:4px;">✔ SAVED!</span>`;
-            }
-            setTimeout(() => {
-                aTag.innerHTML = originalHTML;
-                aTag.style.pointerEvents = originalPointerEvents;
-            }, 3000);
-        });
+        directSave({ element: aTag, url: aTag.href, page: pageInfo, labels: LINK_SAVE_LABELS, logType: "INTERCEPTOR_FAIL" });
     }
 }, true);

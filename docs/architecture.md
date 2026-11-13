@@ -60,7 +60,8 @@ PaperIsHere/
 ├── manifest.json        # MV3 config: permissions, service worker, content script registration
 ├── background.js        # Service worker (~630 lines): APIs, AI naming, download pipeline, logging
 ├── page.js              # Content-script page reading (~270 lines): one readPage() -> one metadata record
-├── content.js           # Content script (~766 lines): FAB UI, menu, link interception
+├── save.js              # Content-script Direct Save contract (~35 lines): pending -> saved/failed -> restore
+├── content.js           # Content script (~740 lines): FAB UI, menu, link interception
 ├── popup.html           # Settings UI (brutalist styling, custom dropdown, advanced panel)
 ├── popup.js             # Popup logic (~183 lines): load/save settings, bug-report composer
 ├── icon16.png           # Sized icons declared in the manifest
@@ -73,15 +74,17 @@ PaperIsHere/
 ├── docs/architecture.md # This document
 ├── docs/adr/            # Decision records 0001–0006
 ├── docs/agents/         # Issue-tracker, triage-label and domain-doc conventions
-└── tests/               # node --test: naming.test.js (naming/shield), page.test.js (page reading)
+└── tests/               # node --test: naming.test.js (naming/shield), page.test.js (page reading), save.test.js (Direct Save)
 ```
 
 `npm test` runs the suites; `npm run check` is a syntax check. `page.js` is the tested
 seam for page reading: `readPage({document, location})` returns
 `{doi, isbn, title, text, pdfUrl, restricted, sciHub, viewer}`. `tests/page.test.js`
 drives it with a hand-built page adapter, so the extraction heuristics need no browser.
-`content.js` keeps the FAB, menu and link interception, where the DOM is still welded
-in and untested.
+`save.js` is the tested seam for Direct Save: `directSave({element, url, page, labels, logType})`
+runs the one pending → saved/failed → restore contract, with a fake element and fake
+`chrome` in `tests/save.test.js`. `content.js` keeps the FAB, menu and link interception,
+where the DOM is still welded in and untested.
 
 ## 6. Architecture
 
@@ -99,8 +102,8 @@ Three layers plus shared storage:
 └─────────────────────┘
 ```
 
-- `manifest.json` registers `content.js` declaratively on `<all_urls>` and
-  `background.js` as service worker.
+- `manifest.json` registers `page.js`, `save.js`, `content.js` (in that order) on
+  `<all_urls>` and `background.js` as service worker.
 - All layers share configuration through `chrome.storage.local`; runtime state
   (metadata stores, rename map) lives in `chrome.storage.session`.
 - The only channel between page context and privileged worker is
@@ -113,6 +116,7 @@ Three layers plus shared storage:
 |---|---|
 | `manifest.json` | Identity (v2.5.0), permissions (`downloads`, `storage`, `activeTab`), `<all_urls>` hosts, popup action, service worker, content-script injection |
 | `page.js` | Reads one page into one record: DOI/ISBN/title/text extraction, Restricted Access detection, publisher-PDF discovery, Sci-Hub and viewer-page flags. First in the content-script list so its globals and `readPage` are available to `content.js` |
+| `save.js` | The one Direct Save contract: pending label, `triggerDirectDownload` payload from `pageInfo`, `saved`/`failed` label, `logError` on failure, 3s restore. Callers only supply the element, the url and their labels |
 | `content.js` | FAB menu injection (orders 1–8); Sci-Hub/Libgen page-specific URL extraction; capture-phase PDF-link interception; SPA URL-change re-init; reads `pageInfo` from one `readPage` call |
 | `background.js` | Per-tab + global metadata stores with Memory Shield, rehydrated from `chrome.storage.session`; Crossref/Gemini/Unpaywall calls; mirror scraping & liveness probing; filename generation (AI + fallbacks); download orchestration incl. `onDeterminingFilename` renaming, HTML Shield, blob fallback; serialized ring-buffer logging |
 | `popup.html` | Save-folder input, naming-style dropdown (6 styles), advanced panel (mirror domains, Nexus bot, Gemini key + opt-in toggle), report/GitHub links |
@@ -145,7 +149,7 @@ Async handlers return `true` to keep `sendResponse` alive; the synchronous
    (viewer pages get an advisory label). Unpaywall button appears async if OA found.
 5. `MutationObserver` detects SPA URL changes → re-init after 800 ms debounce.
 6. **PDF-looking link clicked** → capture-phase listener prevents default,
-   marks element (`data-paperishere-bypass`), sends `triggerDirectDownload`.
+   marks element (`data-paperishere-bypass`), then calls `directSave` (`save.js`).
 7. Background: DOI from clicked URL if needed; original filename from URL;
    final name via `generateFinalFilename`; `activeDownloads[url]=filename`;
    `chrome.downloads.download({url})`. Rename applied via URL lookup in
@@ -198,7 +202,8 @@ it fires on evidence present in the page, never on the publisher's identity:
 
 Two entry paths converge on the rename pipeline:
 
-**A. UI-initiated** (`initiateDirectDownload`; interceptor → `triggerDirectDownload`):
+**A. UI-initiated** (`directSave` in `save.js`; both the FAB button and the interceptor
+call it, differing only in the url and the labels):
 - Sci-Hub pages: URL from `.download a`, `object[type="application/pdf"]`, or iframe
   (`extractSciHubPdfUrl`).
 - Libgen `ads.php`/`get.php`: first GET/CLOUDFLARE/IPFS.IO/PINATA link

@@ -5,6 +5,6 @@
   "description": "PaperIsHere Chrome Extension (Manifest V3). Extension loads with zero build steps; this package exists only for tests and syntax checks.",
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "check": "node --check background.js && node --check page.js && node --check content.js && node --check popup.js && ! grep -nE '\\[[^]]*\\]\\(https?://' *.js && echo SYNTAX_OK"
+    "check": "node --check background.js && node --check page.js && node --check save.js && node --check content.js && node --check popup.js && ! grep -nE '\\[[^]]*\\]\\(https?://' *.js && echo SYNTAX_OK"
   }
 }
